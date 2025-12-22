@@ -36,16 +36,6 @@ with_con <- function(.f) {
   .f(c)
 }
 
-#' Extract native id from a UID like "mag:M001" (R-side)
-#'
-#' @param uid
-#'
-#' @export
-
-uid_native <- function(uid) {
-  sub("^.*?:", "", uid)
-}
-
 #' DBI helper
 #'
 #' @param c connection
@@ -55,4 +45,15 @@ uid_native <- function(uid) {
 
 q <- function(c, sql, ...) {
   DBI::dbGetQuery(c, glue::glue(sql, .open = "{", .close = "}", ...))
+}
+
+
+#' Extract native id from a UID like "mag:M001" (R-side)
+#'
+#' @param uid
+#'
+#' @export
+
+uid_native <- function(uid) {
+  sub("^.*?:", "", uid)
 }
