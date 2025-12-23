@@ -7,7 +7,7 @@
 uid_native(uid)
 }
 \arguments{
-\item{uid}{}
+\item{uid}{uid to strip}
 }
 \description{
 Extract native id from a UID like "mag:M001" (R-side)

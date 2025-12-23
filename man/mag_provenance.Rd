@@ -4,10 +4,10 @@
 \alias{mag_provenance}
 \title{Title}
 \usage{
-mag_provenance(conn, mag_id)
+mag_provenance(connection, mag_id)
 }
 \arguments{
-\item{conn}{db connection}
+\item{connection}{db connection}
 
 \item{mag_id}{uid of MAG}
 }

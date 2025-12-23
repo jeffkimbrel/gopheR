@@ -1,11 +1,11 @@
 #' Title
 #'
-#' @param conn db connection
+#' @param connection db connection
 #'
 #' @export
 
-mag_sample_occurrences <- function(conn) {
-  q(conn, "
+mag_sample_occurrences <- function(connection) {
+  gopher_query(connection, "
     SELECT
       substr(e.child_uid, instr(e.child_uid, ':') + 1)  AS mag_id,
       substr(e.parent_uid, instr(e.parent_uid, ':') + 1) AS readset_id,
@@ -40,15 +40,17 @@ mag_sample_occurrences <- function(conn) {
 
 #' Title
 #'
-#' @param conn db connection
+#' @param connection db connection
 #' @param mag_id uid of MAG
 #'
 #' @export
 
-mag_provenance <- function(conn, mag_id) {
-  q(conn, "
+mag_provenance <- function(connection, mag_id) {
+  gopher_query(
+    connection,
+    "
     SELECT
-      '{mag_id}' AS mag_id,
+      ? AS mag_id,
       substr(e1.parent_uid, instr(e1.parent_uid, ':') + 1) AS assembly_id,
       substr(e2.parent_uid, instr(e2.parent_uid, ':') + 1) AS readset_id,
       e2.role,
@@ -65,7 +67,9 @@ mag_provenance <- function(conn, mag_id) {
     JOIN sample s
       ON s.sample_id = r.sample_id
     WHERE e1.edge_type = 'binned_from'
-      AND e1.child_uid = 'mag:{mag_id}'
+      AND e1.child_uid = ?
     ORDER BY assembly_id, readset_id
-  ", mag_id = mag_id)
+    ",
+    params = list(mag_id, paste0("mag:", mag_id))
+  )
 }

@@ -4,10 +4,10 @@
 \alias{mag_sample_occurrences}
 \title{Title}
 \usage{
-mag_sample_occurrences(conn)
+mag_sample_occurrences(connection)
 }
 \arguments{
-\item{conn}{db connection}
+\item{connection}{db connection}
 }
 \description{
 Title

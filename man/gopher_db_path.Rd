@@ -2,18 +2,23 @@
 % Please edit documentation in R/db.R
 \name{gopher_db_path}
 \alias{gopher_db_path}
-\title{Get path to gopheR database}
+\title{Get path to a gopheR SQLite database file}
 \usage{
-gopher_db_path(path = here::here("data"), db = "gopheR_db.sqlite")
+gopher_db_path(
+  path = NULL,
+  db = getOption("gopheR.db_file", "gopheR_db.sqlite")
+)
 }
 \arguments{
-\item{path}{(\emph{string}) path to db}
+\item{path}{Character scalar. Directory containing the database file.
+If \code{NULL}, uses \code{getOption("gopheR.db_path")} or \code{Sys.getenv("GOPHER_DB_PATH")}.}
 
-\item{db}{(\emph{string}) database name}
+\item{db}{Character scalar. Database filename.}
 }
 \value{
-file path to gopheR_db.sqlite
+A length-1 character vector: full path to the database file.
 }
 \description{
-Get path to gopheR database
+Reliable set of code to determine where exactly a gopheR database is in a
+project.
 }
