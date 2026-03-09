@@ -45,13 +45,15 @@ gopher_con <- function(path = NULL, db = "gopheR_db.sqlite", read_only = FALSE) 
   dbfile <- gopher_db_path(path = path, db = db)
 
   if (isTRUE(read_only)) {
-    # SQLite URI read-only. Requires SQLite to support URI filenames.
-    # Works in most modern builds.
     uri <- paste0("file:", normalizePath(dbfile, winslash = "/"), "?mode=ro")
-    return(DBI::dbConnect(RSQLite::SQLite(), uri, extended_types = TRUE))
+    con <- DBI::dbConnect(RSQLite::SQLite(), uri, extended_types = TRUE)
+    DBI::dbExecute(con, "PRAGMA foreign_keys = ON;")
+    return(con)
   }
 
-  DBI::dbConnect(RSQLite::SQLite(), dbfile, extended_types = TRUE)
+  con <- DBI::dbConnect(RSQLite::SQLite(), dbfile, extended_types = TRUE)
+  DBI::dbExecute(con, "PRAGMA foreign_keys = ON;")
+  con
 }
 
 
