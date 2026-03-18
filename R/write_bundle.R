@@ -65,6 +65,69 @@ write_bundle <- function(out_xlsx,
     spec_name = "object_type"
   )
 
+  # workflow logic
+  workflow_cols <- get_table_columns(
+    "workflow",
+    exclude_cols = c("created_at")
+  )
+
+  add_bundle_sheet(
+    wb = wb,
+    sheet = "workflow",
+    cols = workflow_cols,
+    header_style = header_style
+  )
+
+  suggested_workflow_ids <- get_next_workflow_ids(
+    n = 10,
+    db_path = db_path
+  )
+
+  prefill_bundle_column(
+    wb = wb,
+    sheet = "workflow",
+    cols = workflow_cols,
+    col_name = "workflow_id",
+    values = suggested_workflow_ids
+  )
+
+  # edge logic
+  edge_cols <- get_table_columns(
+    "edge",
+    exclude_cols = c("created_at")
+  )
+
+  allowed_edge_types <- get_edge_types()
+
+  add_bundle_sheet(
+    wb = wb,
+    sheet = "edge",
+    cols = edge_cols,
+    header_style = header_style
+  )
+
+  add_spec_dropdown(
+    wb = wb,
+    target_sheet = "edge",
+    target_cols = edge_cols,
+    target_col_name = "edge_type",
+    spec_values = allowed_edge_types,
+    spec_name = "edge_type"
+  )
+
+  add_sheet_dropdown(
+    wb = wb,
+    target_sheet = "edge",
+    target_cols = edge_cols,
+    target_col_name = "workflow_id",
+    source_sheet = "workflow",
+    source_col_name = "workflow_id",
+    source_cols = workflow_cols
+  )
+
+
+
+
 
   # hide spec sheet
   openxlsx::activeSheet(wb) <- "object" # spec is likely "active", so need to switch it
@@ -196,3 +259,74 @@ get_object_types <- function(db_path = NULL,
     read_only = read_only
   )
 }
+
+
+
+
+
+
+
+get_edge_types <- function(db_path = NULL,
+                             read_only = TRUE) {
+  with_gopher_con(
+    .f = function(con) {
+
+      edge_type_ref <- DBI::dbReadTable(con, "edge_spec")
+
+      edges <- edge_type_ref |>
+        dplyr::pull(.data$edge_type) |>
+        unique()
+
+      sort(unique(edges))
+    },
+    db_path = db_path,
+    read_only = read_only
+  )
+}
+
+
+
+
+get_next_workflow_ids <- function(n = 10,
+                                  db_path = NULL,
+                                  read_only = TRUE,
+                                  prefix = "workflow_",
+                                  pad_width = 4) {
+  with_gopher_con(
+    .f = function(con) {
+
+      workflow_tbl <- DBI::dbReadTable(con, "workflow")
+
+      if (!"workflow_id" %in% names(workflow_tbl) || nrow(workflow_tbl) == 0) {
+        start_num <- 1L
+      } else {
+        ids <- workflow_tbl$workflow_id
+
+        pattern <- paste0("^", prefix, "([0-9]+)$")
+        matches <- grepl(pattern, ids)
+
+        if (!any(matches)) {
+          start_num <- 1L
+        } else {
+          nums <- sub(pattern, "\\1", ids[matches])
+          nums <- suppressWarnings(as.integer(nums))
+          nums <- nums[!is.na(nums)]
+
+          start_num <- if (length(nums) == 0) 1L else max(nums) + 1L
+        }
+      }
+
+      paste0(prefix, stringr::str_pad(start_num:(start_num + n - 1),
+                                      width = pad_width,
+                                      side = "left",
+                                      pad = "0"))
+    },
+    db_path = db_path,
+    read_only = read_only
+  )
+}
+
+
+
+
+

@@ -276,3 +276,80 @@ get_next_spec_col <- function(wb) {
 
   max(spec_sheet$sheet_data$cols) + 1
 }
+
+
+
+
+
+prefill_bundle_column <- function(wb,
+                                  sheet,
+                                  cols,
+                                  col_name,
+                                  values,
+                                  start_row = 2) {
+  col_index <- match(col_name, cols)
+
+  if (is.na(col_index)) {
+    stop(sprintf("Column '%s' not found in sheet '%s'.", col_name, sheet))
+  }
+
+  openxlsx::writeData(
+    wb = wb,
+    sheet = sheet,
+    x = data.frame(value = values),
+    startCol = col_index,
+    startRow = start_row,
+    colNames = FALSE
+  )
+
+  invisible(wb)
+}
+
+
+
+
+
+
+
+add_sheet_dropdown <- function(wb,
+                               target_sheet,
+                               target_cols,
+                               target_col_name,
+                               source_sheet,
+                               source_col_name,
+                               source_cols,
+                               target_rows = 2:1000,
+                               source_rows = 2:1000) {
+  target_col_index <- match(target_col_name, target_cols)
+  source_col_index <- match(source_col_name, source_cols)
+
+  if (is.na(target_col_index)) {
+    stop(sprintf("Target column '%s' not found in sheet '%s'.",
+                 target_col_name, target_sheet))
+  }
+
+  if (is.na(source_col_index)) {
+    stop(sprintf("Source column '%s' not found in sheet '%s'.",
+                 source_col_name, source_sheet))
+  }
+
+  source_col_letter <- openxlsx::int2col(source_col_index)
+
+  source_range <- paste0(
+    source_sheet, "!$",
+    source_col_letter, "$", min(source_rows),
+    ":$",
+    source_col_letter, "$", max(source_rows)
+  )
+
+  openxlsx::dataValidation(
+    wb = wb,
+    sheet = target_sheet,
+    cols = target_col_index,
+    rows = target_rows,
+    type = "list",
+    value = source_range
+  )
+
+  invisible(wb)
+}
