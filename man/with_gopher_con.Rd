@@ -4,20 +4,14 @@
 \alias{with_gopher_con}
 \title{Evaluate a function with a database connection}
 \usage{
-with_gopher_con(
-  .f,
-  ...,
-  path = NULL,
-  db = "gopheR_db.sqlite",
-  read_only = FALSE
-)
+with_gopher_con(.f, ..., db_path = NULL, read_only = FALSE)
 }
 \arguments{
 \item{.f}{A function with first argument \code{con}.}
 
 \item{...}{Additional arguments passed to \code{.f}.}
 
-\item{path, db, read_only}{Passed to \code{\link[=gopher_con]{gopher_con()}}.}
+\item{db_path, read_only}{Passed to \code{\link[=gopher_con]{gopher_con()}}.}
 }
 \value{
 The return value of \code{.f}.

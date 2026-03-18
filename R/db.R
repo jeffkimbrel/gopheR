@@ -16,16 +16,20 @@ gopher_db_path <- function(path = NULL,
   if (is.null(path)) {
     path <- getOption("gopheR.db_path", Sys.getenv("GOPHER_DB_PATH", unset = ""))
     if (!nzchar(path)) {
-      stop(
-        "No database path set. Provide `path=` or set option('gopheR.db_path') / env var GOPHER_DB_PATH.",
-        call. = FALSE
-      )
+      cli::cli_abort(c(
+        "No database path set.",
+        "i" = "Provide {.arg db_path} directly, or set {.option gopheR.db_path}, or {.envvar GOPHER_DB_PATH}."
+      ))
     }
   }
 
   gopher_path <- file.path(path, db)
   if (!file.exists(gopher_path)) {
-    stop(glue::glue("No database file found at {gopher_path}"), call. = FALSE)
+    cli::cli_abort(c(
+      "No database file found.",
+      "x" = "Path: {.path {gopher_path}}",
+      "i" = "Check that {.option gopheR.db_path} and {.option gopheR.db_file} are set correctly."
+    ))
   }
 
   gopher_path
@@ -35,14 +39,14 @@ gopher_db_path <- function(path = NULL,
 
 #' Open a database connection
 #'
-#' @param path,db Passed to [gopher_db_path()].
+#' @param db_path path to gopher DB
 #' @param read_only Logical. If `TRUE`, attempts to open the SQLite DB in read-only mode.
 #'
 #' @returns A DBI connection.
 #' @export
 
-gopher_con <- function(path = NULL, db = "gopheR_db.sqlite", read_only = FALSE) {
-  dbfile <- gopher_db_path(path = path, db = db)
+gopher_con <- function(db_path = NULL, read_only = FALSE) {
+  dbfile <- if (is.null(db_path)) gopher_db_path() else db_path
 
   if (isTRUE(read_only)) {
     uri <- paste0("file:", normalizePath(dbfile, winslash = "/"), "?mode=ro")
@@ -56,24 +60,22 @@ gopher_con <- function(path = NULL, db = "gopheR_db.sqlite", read_only = FALSE) 
   con
 }
 
-
-
 #' Evaluate a function with a database connection
 #'
 #' @param .f A function with first argument `con`.
 #' @param ... Additional arguments passed to `.f`.
-#' @param path,db,read_only Passed to [gopher_con()].
+#' @param db_path,read_only Passed to [gopher_con()].
 #'
 #' @returns The return value of `.f`.
 #' @export
-with_gopher_con <- function(.f, ..., path = NULL, db = "gopheR_db.sqlite", read_only = FALSE) {
-  con <- gopher_con(path = path, db = db, read_only = read_only)
+
+with_gopher_con <- function(.f, ...,
+                            db_path = NULL,
+                            read_only = FALSE) {
+  con <- gopher_con(db_path = db_path, read_only = read_only)
   on.exit(DBI::dbDisconnect(con), add = TRUE)
   .f(con, ...)
 }
-
-
-
 
 #' Run a parameterized query and return a data frame
 #'
@@ -89,19 +91,4 @@ gopher_query <- function(con, sql, params = NULL) {
     return(DBI::dbGetQuery(con, sql))
   }
   DBI::dbGetQuery(con, sql, params = params)
-}
-
-
-
-
-
-
-#' Extract native id from a UID like "mag:M001" (R-side)
-#'
-#' @param uid uid to strip
-#'
-#' @export
-
-uid_native <- function(uid) {
-  sub("^.*?:", "", uid)
 }

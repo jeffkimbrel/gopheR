@@ -4,10 +4,10 @@
 \alias{gopher_con}
 \title{Open a database connection}
 \usage{
-gopher_con(path = NULL, db = "gopheR_db.sqlite", read_only = FALSE)
+gopher_con(db_path = NULL, read_only = FALSE)
 }
 \arguments{
-\item{path, db}{Passed to \code{\link[=gopher_db_path]{gopher_db_path()}}.}
+\item{db_path}{path to gopher DB}
 
 \item{read_only}{Logical. If \code{TRUE}, attempts to open the SQLite DB in read-only mode.}
 }
