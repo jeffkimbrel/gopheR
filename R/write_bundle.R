@@ -91,6 +91,18 @@ write_bundle <- function(out_xlsx,
     values = suggested_workflow_ids
   )
 
+  ## add workflow comment
+  workflow_id_col <- match("workflow_id", workflow_cols)
+
+  add_cell_comment(
+    wb = wb,
+    sheet = "workflow",
+    row = 1,
+    col = workflow_id_col,
+    comment = "Suggested workflow IDs are prefilled below. You may use, increment or replace them. IDs must be unique."
+  )
+
+
   # edge logic
   edge_cols <- get_table_columns(
     "edge",
@@ -127,6 +139,73 @@ write_bundle <- function(out_xlsx,
 
 
 
+  # result logic
+  result_cols <- get_table_columns(
+    "result",
+    exclude_cols = c("result_id", "created_at")
+  )
+
+  allowed_result_types <- get_result_types()
+
+  add_bundle_sheet(
+    wb = wb,
+    sheet = "result",
+    cols = result_cols,
+    header_style = header_style
+  )
+
+  add_spec_dropdown(
+    wb = wb,
+    target_sheet = "result",
+    target_cols = result_cols,
+    target_col_name = "key",
+    spec_values = allowed_result_types,
+    spec_name = "key"
+  )
+
+  add_sheet_dropdown(
+    wb = wb,
+    target_sheet = "result",
+    target_cols = result_cols,
+    target_col_name = "workflow_id",
+    source_sheet = "workflow",
+    source_col_name = "workflow_id",
+    source_cols = workflow_cols
+  )
+
+  # file logic
+  object_file_cols <- get_table_columns(
+    "object_file",
+    exclude_cols = c("object_file_id", "created_at")
+  )
+
+  allowed_object_file_types <- get_object_file_types()
+
+  add_bundle_sheet(
+    wb = wb,
+    sheet = "object_file",
+    cols = object_file_cols,
+    header_style = header_style
+  )
+
+  add_spec_dropdown(
+    wb = wb,
+    target_sheet = "object_file",
+    target_cols = object_file_cols,
+    target_col_name = "file_role",
+    spec_values = allowed_object_file_types,
+    spec_name = "file_role"
+  )
+
+  add_sheet_dropdown(
+    wb = wb,
+    target_sheet = "object_file",
+    target_cols = object_file_cols,
+    target_col_name = "workflow_id",
+    source_sheet = "workflow",
+    source_col_name = "workflow_id",
+    source_cols = workflow_cols
+  )
 
 
   # hide spec sheet
@@ -242,16 +321,14 @@ get_object_types <- function(db_path = NULL,
       }
 
       objects <- object_type_ref |>
-        dplyr::pull(.data$object_type) |>
-        unique()
+        dplyr::pull(.data$object_type)
 
       subtypes <- object_subtype_ref |>
         dplyr::filter(!is.na(.data$object_subtype), nzchar(.data$object_subtype)) |>
         dplyr::mutate(
           object_label = paste(.data$object_type, .data$object_subtype, sep = ":")
         ) |>
-        dplyr::pull(.data$object_label) |>
-        unique()
+        dplyr::pull(.data$object_label)
 
       sort(unique(c(objects, subtypes)))
     },
@@ -264,21 +341,42 @@ get_object_types <- function(db_path = NULL,
 
 
 
-
+#' Get allowed edge types from the database
+#'
+#' Returns unique edge types defined in `edge_spec`.
+#'
+#' @param db_path Optional path to the database.
+#' @param read_only Logical; open connection in read-only mode.
+#'
+#' @return Character vector of edge types.
+#' @keywords internal
 
 get_edge_types <- function(db_path = NULL,
+                           read_only = TRUE) {
+  get_spec_values(
+    table = "edge_spec",
+    column = "edge_type",
+    db_path = db_path,
+    read_only = read_only
+  )
+}
+
+
+#' Get allowed result keys from the database
+#'
+#' Returns unique result keys defined in `key_spec`.
+#'
+#' @param db_path Optional path to the database.
+#' @param read_only Logical; open connection in read-only mode.
+#'
+#' @return Character vector of result keys.
+#' @keywords internal
+
+get_result_types <- function(db_path = NULL,
                              read_only = TRUE) {
-  with_gopher_con(
-    .f = function(con) {
-
-      edge_type_ref <- DBI::dbReadTable(con, "edge_spec")
-
-      edges <- edge_type_ref |>
-        dplyr::pull(.data$edge_type) |>
-        unique()
-
-      sort(unique(edges))
-    },
+  get_spec_values(
+    table = "key_spec",
+    column = "key",
     db_path = db_path,
     read_only = read_only
   )
@@ -286,6 +384,42 @@ get_edge_types <- function(db_path = NULL,
 
 
 
+
+#' Get allowed object file types from the database
+#'
+#' Returns unique file roles defined in `object_file_type_spec`.
+#'
+#' @param db_path Optional path to the database.
+#' @param read_only Logical; open connection in read-only mode.
+#'
+#' @return Character vector of file roles.
+#' @keywords internal
+
+get_object_file_types <- function(db_path = NULL,
+                                  read_only = TRUE) {
+  get_spec_values(
+    table = "object_file_type_spec",
+    column = "file_role",
+    db_path = db_path,
+    read_only = read_only
+  )
+}
+
+
+
+#' Generate next workflow IDs
+#'
+#' Generates a sequence of workflow IDs based on existing IDs in the database,
+#' using a prefix and zero-padded numeric suffix.
+#'
+#' @param n Number of workflow IDs to generate.
+#' @param db_path Optional path to the database.
+#' @param read_only Logical; open connection in read-only mode.
+#' @param prefix Prefix for workflow IDs. Defaults to `"workflow_"`.
+#' @param pad_width Width for zero-padding numeric suffix.
+#'
+#' @return Character vector of workflow IDs.
+#' @keywords internal
 
 get_next_workflow_ids <- function(n = 10,
                                   db_path = NULL,
@@ -329,4 +463,31 @@ get_next_workflow_ids <- function(n = 10,
 
 
 
+#' Get unique values from a specification table column
+#'
+#' Reads a table from the database and returns sorted unique values from a
+#' specified column.
+#'
+#' @param table Name of the table to read.
+#' @param column Name of the column to extract values from.
+#' @param db_path Optional path to the database.
+#' @param read_only Logical; open connection in read-only mode.
+#'
+#' @return Character vector of unique values.
+#' @keywords internal
 
+get_spec_values <- function(table,
+                            column,
+                            db_path = NULL,
+                            read_only = TRUE) {
+  with_gopher_con(
+    .f = function(con) {
+      DBI::dbReadTable(con, table) |>
+        dplyr::pull(.data[[column]]) |>
+        unique() |>
+        sort()
+    },
+    db_path = db_path,
+    read_only = read_only
+  )
+}

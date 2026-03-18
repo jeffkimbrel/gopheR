@@ -279,7 +279,19 @@ get_next_spec_col <- function(wb) {
 
 
 
-
+#' Prefill values in a bundle worksheet column
+#'
+#' Writes a vector of values into a named column in an existing workbook sheet.
+#'
+#' @param wb An openxlsx workbook object.
+#' @param sheet Sheet name to write to.
+#' @param cols Character vector of column names in the target sheet.
+#' @param col_name Name of the target column to prefill.
+#' @param values Vector of values to write.
+#' @param start_row First row to write values into. Defaults to 2.
+#'
+#' @return Invisibly returns `wb`.
+#' @keywords internal
 
 prefill_bundle_column <- function(wb,
                                   sheet,
@@ -309,7 +321,25 @@ prefill_bundle_column <- function(wb,
 
 
 
-
+#' Add a dropdown to a bundle worksheet from another sheet column
+#'
+#' Applies Excel data validation to a target column using values from a column
+#' in another worksheet.
+#'
+#' @param wb An openxlsx workbook object.
+#' @param target_sheet Sheet containing the dropdown column.
+#' @param target_cols Character vector of column names in the target sheet.
+#' @param target_col_name Name of the target column to receive validation.
+#' @param source_sheet Sheet containing the allowed values.
+#' @param source_col_name Name of the source column providing allowed values.
+#' @param source_cols Character vector of column names in the source sheet.
+#' @param target_rows Integer vector of target rows to validate. Defaults to
+#'   `2:1000`.
+#' @param source_rows Integer vector of source rows to use for the dropdown.
+#'   Defaults to `2:1000`.
+#'
+#' @return Invisibly returns `wb`.
+#' @keywords internal
 
 add_sheet_dropdown <- function(wb,
                                target_sheet,
@@ -349,6 +379,51 @@ add_sheet_dropdown <- function(wb,
     rows = target_rows,
     type = "list",
     value = source_range
+  )
+
+  invisible(wb)
+}
+
+
+
+#' Add a cell comment to a workbook sheet
+#'
+#' Creates and writes a comment to a single cell in a worksheet.
+#'
+#' @param wb An openxlsx workbook object.
+#' @param sheet Sheet name to write the comment to.
+#' @param row Row index of the target cell.
+#' @param col Column index of the target cell.
+#' @param comment Comment text.
+#' @param author Comment author. Defaults to `"gopher"`.
+#' @param width Comment box width. Defaults to 4.
+#' @param height Comment box height. Defaults to 2.
+#'
+#' @return Invisibly returns `wb`.
+#' @keywords internal
+
+add_cell_comment <- function(wb,
+                             sheet,
+                             row,
+                             col,
+                             comment,
+                             author = "gopher",
+                             width = 4,
+                             height = 2) {
+
+  cm <- openxlsx::createComment(
+    comment = comment,
+    author = author,
+    width = width,
+    height = height
+  )
+
+  openxlsx::writeComment(
+    wb = wb,
+    sheet = sheet,
+    col = col,
+    row = row,
+    comment = cm
   )
 
   invisible(wb)
