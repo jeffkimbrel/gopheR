@@ -22,7 +22,7 @@ test_that("read_bundle validates and inserts objects successfully", {
   openxlsx::saveWorkbook(wb, bundle_path, overwrite = TRUE)
 
   # Ingest bundle
-  result <- read_bundle(bundle_path, validate_only = FALSE, backup = FALSE)
+  result <- read_bundle(bundle_path, validate_only = FALSE, backup = FALSE, default_user = "test_user")
 
   # Verify objects were inserted
   con <- DBI::dbConnect(RSQLite::SQLite(), db_info$full_path)
@@ -67,7 +67,7 @@ test_that("read_bundle validate_only mode does not insert objects", {
   openxlsx::saveWorkbook(wb, bundle_path, overwrite = TRUE)
 
   # Validate only
-  result <- read_bundle(bundle_path, validate_only = TRUE)
+  result <- read_bundle(bundle_path, validate_only = TRUE, default_user = "test_user")
 
   # Verify objects were NOT inserted
   con <- DBI::dbConnect(RSQLite::SQLite(), db_info$full_path)
@@ -107,7 +107,7 @@ test_that("read_bundle fails with invalid object type", {
 
   # Should fail validation
   expect_error(
-    read_bundle(bundle_path, validate_only = FALSE, backup = FALSE),
+    read_bundle(bundle_path, validate_only = FALSE, backup = FALSE, default_user = "test_user"),
     "Invalid object types"
   )
 
@@ -141,7 +141,7 @@ test_that("read_bundle returns summary results", {
   openxlsx::saveWorkbook(wb, bundle_path, overwrite = TRUE)
 
   # Ingest
-  result <- read_bundle(bundle_path, validate_only = FALSE, backup = FALSE)
+  result <- read_bundle(bundle_path, validate_only = FALSE, backup = FALSE, default_user = "test_user")
 
   # Check result structure
   expect_true("results" %in% names(result))

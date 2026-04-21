@@ -4,7 +4,7 @@
 \alias{ingest_objects_with_con}
 \title{Ingest objects from bundle worksheet (with existing connection)}
 \usage{
-ingest_objects_with_con(wb, con, validate_only = FALSE)
+ingest_objects_with_con(wb, con, validate_only = FALSE, preflight_data = NULL)
 }
 \arguments{
 \item{wb}{An openxlsx workbook object.}

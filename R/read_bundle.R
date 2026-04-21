@@ -1,3 +1,134 @@
+#' Pre-flight validation of bundle before database backup
+#'
+#' Performs fast validation checks that don't require database queries.
+#' Checks for empty created_by fields, duplicate IDs within bundle, and
+#' basic structural issues.
+#'
+#' @param wb openxlsx workbook object
+#' @param default_user Optional character scalar for filling empty created_by fields
+#'
+#' @return List with valid (logical), message (character), and wb (potentially modified workbook)
+#' @keywords internal
+preflight_validate_bundle <- function(wb, default_user = NULL) {
+
+  sheet_names <- names(wb)
+  errors <- character()
+
+  # Read sheets if they exist
+  people_data <- NULL
+  workflow_data <- NULL
+  object_data <- NULL
+  edge_data <- NULL
+
+  if ("people" %in% sheet_names) {
+    people_data <- openxlsx::readWorkbook(wb, sheet = "people")
+    # Filter empty rows
+    if (nrow(people_data) > 0) {
+      people_data <- people_data |>
+        dplyr::filter(!is.na(.data$person_id) & nzchar(.data$person_id))
+    }
+  }
+
+  if ("workflow" %in% sheet_names) {
+    workflow_data <- openxlsx::readWorkbook(wb, sheet = "workflow")
+    # Filter empty rows (prefilled templates)
+    if (nrow(workflow_data) > 0) {
+      workflow_data <- workflow_data |>
+        dplyr::filter(!is.na(.data$workflow_id) & nzchar(.data$workflow_id)) |>
+        dplyr::filter(!is.na(.data$description) & nzchar(.data$description))
+    }
+  }
+
+  if ("object" %in% sheet_names) {
+    object_data <- openxlsx::readWorkbook(wb, sheet = "object")
+    # Filter empty rows
+    if (nrow(object_data) > 0) {
+      object_data <- object_data |>
+        dplyr::filter(!is.na(.data$object_id) & nzchar(.data$object_id))
+    }
+  }
+
+  if ("edge" %in% sheet_names) {
+    edge_data <- openxlsx::readWorkbook(wb, sheet = "edge")
+    # Filter empty rows
+    if (nrow(edge_data) > 0) {
+      edge_data <- edge_data |>
+        dplyr::filter(!is.na(.data$parent_id) & nzchar(.data$parent_id)) |>
+        dplyr::filter(!is.na(.data$child_id) & nzchar(.data$child_id))
+    }
+  }
+
+  # Check 1: created_by required in workflows
+  if (!is.null(workflow_data) && nrow(workflow_data) > 0) {
+    empty_created_by <- is.na(workflow_data$created_by) | !nzchar(workflow_data$created_by)
+    if (any(empty_created_by)) {
+      if (!is.null(default_user)) {
+        workflow_data$created_by[empty_created_by] <- default_user
+        cli::cli_alert_info("Filled {sum(empty_created_by)} empty workflow created_by field(s) with '{default_user}'")
+      } else {
+        errors <- c(errors, sprintf("Workflow sheet has %d row(s) with empty created_by field. Provide default_user parameter or fill in Excel.", sum(empty_created_by)))
+      }
+    }
+  }
+
+  # Check 2: created_by required in objects
+  if (!is.null(object_data) && nrow(object_data) > 0) {
+    empty_created_by <- is.na(object_data$created_by) | !nzchar(object_data$created_by)
+    if (any(empty_created_by)) {
+      if (!is.null(default_user)) {
+        object_data$created_by[empty_created_by] <- default_user
+        cli::cli_alert_info("Filled {sum(empty_created_by)} empty object created_by field(s) with '{default_user}'")
+      } else {
+        errors <- c(errors, sprintf("Object sheet has %d row(s) with empty created_by field. Provide default_user parameter or fill in Excel.", sum(empty_created_by)))
+      }
+    }
+  }
+
+  # Check 3: Duplicate workflow_ids within bundle
+  if (!is.null(workflow_data) && nrow(workflow_data) > 0) {
+    dup_workflows <- workflow_data$workflow_id[duplicated(workflow_data$workflow_id)]
+    if (length(dup_workflows) > 0) {
+      errors <- c(errors, sprintf("Duplicate workflow_ids in bundle: %s", paste(dup_workflows, collapse = ", ")))
+    }
+  }
+
+  # Check 4: Duplicate object_ids within bundle
+  if (!is.null(object_data) && nrow(object_data) > 0) {
+    dup_objects <- object_data$object_id[duplicated(object_data$object_id)]
+    if (length(dup_objects) > 0) {
+      errors <- c(errors, sprintf("Duplicate object_ids in bundle: %s", paste(dup_objects, collapse = ", ")))
+    }
+  }
+
+  # Check 5: Edges reference objects in bundle (or will need DB check)
+  # This is just a structural check - we'll verify DB existence later
+  if (!is.null(edge_data) && nrow(edge_data) > 0) {
+    if (is.null(object_data) || nrow(object_data) == 0) {
+      # No objects in bundle - all edge references must exist in DB
+      # We'll check this during DB validation phase
+    }
+  }
+
+  if (length(errors) > 0) {
+    return(list(
+      valid = FALSE,
+      message = paste("Pre-flight validation failed:\n", paste("  -", errors, collapse = "\n")),
+      people_data = NULL,
+      workflow_data = NULL,
+      object_data = NULL
+    ))
+  }
+
+  list(
+    valid = TRUE,
+    message = "Pre-flight validation passed",
+    people_data = people_data,
+    workflow_data = workflow_data,
+    object_data = object_data
+  )
+}
+
+
 #' Read and ingest a gopheR Excel bundle
 #'
 #' Reads an Excel bundle, validates the data against database specifications,
@@ -13,6 +144,9 @@
 #'   restoration if any error occurs during ingestion.
 #' @param validate_only Logical. If \code{TRUE}, validates the bundle without
 #'   inserting any data. Useful for checking data quality before committing.
+#' @param default_user Optional character scalar. If provided, will be used to
+#'   fill any empty \code{created_by} fields in workflows and objects. If not
+#'   provided and empty \code{created_by} fields are found, an error is raised.
 #' @param ... Additional arguments (currently unused).
 #'
 #' @return Invisibly returns a list with components:
@@ -26,10 +160,11 @@
 #' @details
 #' The function performs the following steps:
 #' \enumerate{
-#'   \item Creates a database backup (unless \code{backup = FALSE} or \code{validate_only = TRUE})
 #'   \item Loads the Excel workbook
+#'   \item Performs pre-flight validation (duplicates, required fields, created_by)
+#'   \item Creates a database backup (unless \code{backup = FALSE} or \code{validate_only = TRUE})
 #'   \item Begins a database transaction
-#'   \item Validates and ingests each sheet (currently: objects)
+#'   \item Validates and ingests each sheet (workflows, objects, edges)
 #'   \item If any error occurs: rolls back transaction and restores from backup
 #'   \item If all succeeds: commits transaction
 #' }
@@ -45,8 +180,8 @@
 #' # Validate without inserting
 #' read_bundle("my_data.xlsx", validate_only = TRUE)
 #'
-#' # Insert validated data
-#' results <- read_bundle("my_data.xlsx")
+#' # Insert validated data with default user
+#' results <- read_bundle("my_data.xlsx", default_user = "jkimbrel")
 #' results$results$objects  # Check what was inserted
 #' }
 #'
@@ -56,6 +191,7 @@ read_bundle <- function(bundle_path,
                         db_path = NULL,
                         backup = TRUE,
                         validate_only = FALSE,
+                        default_user = NULL,
                         ...) {
 
   db_path <- gopher_db_path(db_path)
@@ -64,18 +200,29 @@ read_bundle <- function(bundle_path,
     cli::cli_abort("Bundle file does not exist: {.path {bundle_path}}")
   }
 
-  # Create backup before any modifications
-  backup_info <- NULL
-  if (isTRUE(backup) && !isTRUE(validate_only)) {
-    backup_info <- backup_db(db_path = db_path)
-  }
-
   # Load workbook
   wb <- openxlsx::loadWorkbook(bundle_path)
   sheet_names <- names(wb)
 
   cli::cli_alert_info("Processing bundle: {.path {basename(bundle_path)}}")
   cli::cli_alert_info("Available sheets: {.val {sheet_names}}")
+
+  # Pre-flight validation (before backup)
+  preflight_result <- preflight_validate_bundle(wb, default_user = default_user)
+  if (!preflight_result$valid) {
+    cli::cli_abort(preflight_result$message)
+  }
+
+  # Get potentially modified data from preflight (with filled default_user)
+  preflight_people_data <- preflight_result$people_data
+  preflight_workflow_data <- preflight_result$workflow_data
+  preflight_object_data <- preflight_result$object_data
+
+  # Create backup before any modifications
+  backup_info <- NULL
+  if (isTRUE(backup) && !isTRUE(validate_only)) {
+    backup_info <- backup_db(db_path = db_path)
+  }
 
   # Wrap ingestion in tryCatch for rollback on error
   ingestion_result <- tryCatch(
@@ -95,9 +242,21 @@ read_bundle <- function(bundle_path,
           # Track auto-created people for warning at end
           auto_created_people <- character()
 
+          # Process people sheet first (must come before workflows/objects that reference them)
+          if ("people" %in% sheet_names) {
+            people_result <- ingest_people_with_con(wb, con,
+                                                     validate_only = validate_only,
+                                                     preflight_data = preflight_people_data)
+            results$people <- people_result
+          } else {
+            results$people <- NULL
+          }
+
           # Process workflow sheet (must come before edges/objects that reference it)
           if ("workflow" %in% sheet_names) {
-            workflow_result <- ingest_workflows_with_con(wb, con, validate_only = validate_only)
+            workflow_result <- ingest_workflows_with_con(wb, con,
+                                                          validate_only = validate_only,
+                                                          preflight_data = preflight_workflow_data)
             results$workflows <- workflow_result$results
             auto_created_people <- c(auto_created_people, workflow_result$auto_created_people)
           } else {
@@ -106,7 +265,9 @@ read_bundle <- function(bundle_path,
 
           # Process object sheet
           if ("object" %in% sheet_names) {
-            obj_result <- ingest_objects_with_con(wb, con, validate_only = validate_only)
+            obj_result <- ingest_objects_with_con(wb, con,
+                                                   validate_only = validate_only,
+                                                   preflight_data = preflight_object_data)
             results$objects <- obj_result
             auto_created_people <- c(auto_created_people, obj_result$auto_created_people)
           } else {
@@ -205,10 +366,14 @@ read_bundle <- function(bundle_path,
 #' @keywords internal
 #' @importFrom rlang .data
 
-ingest_objects_with_con <- function(wb, con, validate_only = FALSE) {
+ingest_objects_with_con <- function(wb, con, validate_only = FALSE, preflight_data = NULL) {
 
-  # Read the object sheet
-  object_data <- openxlsx::read.xlsx(wb, sheet = "object")
+  # Use preflight data if provided, otherwise read from workbook
+  if (!is.null(preflight_data)) {
+    object_data <- preflight_data
+  } else {
+    object_data <- openxlsx::read.xlsx(wb, sheet = "object")
+  }
 
   if (is.null(object_data) || nrow(object_data) == 0) {
     cli::cli_alert_warning("Object sheet is empty. Skipping.")
@@ -518,6 +683,142 @@ print_ingestion_summary <- function(results, validate_only = FALSE) {
 }
 
 
+#' Ingest people from bundle worksheet (with existing connection)
+#'
+#' Reads people records from the 'people' sheet, validates them, and inserts
+#' into the database. Only allows insertions, not updates. If person_id already
+#' exists in the database, an error is raised.
+#'
+#' @param wb openxlsx workbook object
+#' @param con A DBI connection to the database
+#' @param validate_only Logical; if TRUE, validation only (no insertion)
+#' @param preflight_data Optional data.frame from preflight validation
+#'
+#' @return List with results
+#' @keywords internal
+ingest_people_with_con <- function(wb, con, validate_only = FALSE, preflight_data = NULL) {
+
+  # Use preflight data if provided, otherwise read from workbook
+  if (!is.null(preflight_data)) {
+    people_data <- preflight_data
+  } else {
+    people_data <- openxlsx::read.xlsx(wb, sheet = "people")
+  }
+
+  if (is.null(people_data) || nrow(people_data) == 0) {
+    cli::cli_alert_warning("People sheet is empty. Skipping.")
+    return(list(
+      n_processed = 0,
+      n_inserted = 0,
+      validation_passed = TRUE
+    ))
+  }
+
+  # Filter out empty rows
+  people_data <- people_data |>
+    dplyr::filter(!is.na(.data$person_id) & nzchar(.data$person_id))
+
+  if (nrow(people_data) == 0) {
+    cli::cli_alert_warning("People sheet has no valid person_id entries. Skipping.")
+    return(list(
+      n_processed = 0,
+      n_inserted = 0,
+      validation_passed = TRUE
+    ))
+  }
+
+  cli::cli_alert_info("Found {nrow(people_data)} person/people in bundle.")
+
+  # Validate
+  validation_result <- validate_people_with_con(people_data, con)
+  if (!validation_result$valid) {
+    cli::cli_abort(validation_result$message)
+  }
+
+  # Insert people
+  if (!isTRUE(validate_only)) {
+    result <- insert_people_with_con(people_data, con)
+    cli::cli_alert_success("Inserted {result$n_inserted} person/people into database.")
+  } else {
+    result <- list(n_inserted = 0)
+  }
+
+  list(
+    n_processed = nrow(people_data),
+    n_inserted = result$n_inserted,
+    validation_passed = TRUE
+  )
+}
+
+
+#' Validate people against database (with connection)
+#'
+#' Checks that person_ids are unique within bundle and don't already exist
+#' in database.
+#'
+#' @param people_data Data frame of people to validate
+#' @param con A DBI connection to the database
+#'
+#' @return List with valid (logical) and message (character) elements
+#' @keywords internal
+validate_people_with_con <- function(people_data, con) {
+
+  errors <- character()
+
+  # Check for duplicates within bundle
+  dup_ids <- people_data$person_id[duplicated(people_data$person_id)]
+  if (length(dup_ids) > 0) {
+    errors <- c(errors, sprintf("Duplicate person_ids in bundle: %s",
+                                 paste(dup_ids, collapse = ", ")))
+  }
+
+  # Check for existing person_ids in database
+  existing_people <- DBI::dbReadTable(con, "people")
+  if (nrow(existing_people) > 0) {
+    existing_ids <- intersect(people_data$person_id, existing_people$person_id)
+    if (length(existing_ids) > 0) {
+      errors <- c(errors, sprintf("Person IDs already exist in database: %s",
+                                   paste(existing_ids, collapse = ", ")))
+    }
+  }
+
+  if (length(errors) > 0) {
+    return(list(valid = FALSE, message = paste(errors, collapse = "\n")))
+  }
+
+  list(valid = TRUE, message = "People validation passed")
+}
+
+
+#' Insert people into database (with connection)
+#'
+#' Inserts validated people records into the people table.
+#'
+#' @param people_data Data frame of people to insert
+#' @param con A DBI connection to the database
+#'
+#' @return List with n_inserted count
+#' @keywords internal
+insert_people_with_con <- function(people_data, con) {
+
+  # Select only columns that exist in the people table
+  db_cols <- DBI::dbListFields(con, "people")
+
+  # Exclude created_at (auto-generated by DB) and is_active (we set it explicitly)
+  db_cols <- db_cols[!db_cols %in% c("created_at", "is_active")]
+
+  insert_cols <- intersect(names(people_data), db_cols)
+  insert_data <- people_data[, insert_cols, drop = FALSE]
+
+  # Always set is_active = 1 for new people
+  insert_data$is_active <- 1L
+
+  DBI::dbWriteTable(con, "people", insert_data, append = TRUE, row.names = FALSE)
+
+  list(n_inserted = nrow(insert_data))
+}
+
+
 #' Ingest workflows from bundle worksheet (with existing connection)
 #'
 #' Reads the workflow sheet from an Excel bundle, validates the data, and
@@ -531,10 +832,14 @@ print_ingestion_summary <- function(results, validate_only = FALSE) {
 #' @keywords internal
 #' @importFrom rlang .data
 
-ingest_workflows_with_con <- function(wb, con, validate_only = FALSE) {
+ingest_workflows_with_con <- function(wb, con, validate_only = FALSE, preflight_data = NULL) {
 
-  # Read the workflow sheet
-  workflow_data <- openxlsx::read.xlsx(wb, sheet = "workflow")
+  # Use preflight data if provided, otherwise read from workbook
+  if (!is.null(preflight_data)) {
+    workflow_data <- preflight_data
+  } else {
+    workflow_data <- openxlsx::read.xlsx(wb, sheet = "workflow")
+  }
 
   if (is.null(workflow_data) || nrow(workflow_data) == 0) {
     cli::cli_alert_warning("Workflow sheet is empty. Skipping.")
@@ -652,16 +957,59 @@ auto_create_people <- function(person_ids, con, validate_only = FALSE) {
     return(character())
   }
 
-  # Create minimal records for missing people
+  # Create records for missing people
   if (!isTRUE(validate_only)) {
-    new_people <- data.frame(
-      person_id = missing_people,
-      full_name = NA_character_,
-      email = NA_character_,
-      is_active = 1L,
-      successor_person_id = NA_character_,
-      stringsAsFactors = FALSE
-    )
+
+    # Prompt for email if interactive
+    if (interactive()) {
+      new_people_list <- list()
+
+      for (person in missing_people) {
+        message(sprintf("\nNew user '%s' detected in bundle.", person))
+        email <- readline(prompt = sprintf("Enter email address for '%s': ", person))
+
+        # Check if email already exists
+        email_check <- DBI::dbGetQuery(
+          con,
+          "SELECT person_id FROM people WHERE email = ?",
+          params = list(email)
+        )
+
+        if (nrow(email_check) > 0) {
+          existing_id <- email_check$person_id[1]
+          warning(sprintf(
+            "Email '%s' already exists for user '%s'. Consider using '%s' instead of '%s' in your bundle to avoid duplicate people.",
+            email, existing_id, existing_id, person
+          ))
+          proceed <- readline(prompt = "Continue anyway? (y/n): ")
+          if (!tolower(proceed) %in% c("y", "yes")) {
+            stop("Ingestion cancelled. Please update person_id in your bundle and try again.", call. = FALSE)
+          }
+        }
+
+        new_people_list[[person]] <- data.frame(
+          person_id = person,
+          full_name = NA_character_,
+          email = email,
+          is_active = 1L,
+          successor_person_id = NA_character_,
+          stringsAsFactors = FALSE
+        )
+      }
+
+      new_people <- dplyr::bind_rows(new_people_list)
+
+    } else {
+      # Non-interactive: create with NA email
+      new_people <- data.frame(
+        person_id = missing_people,
+        full_name = NA_character_,
+        email = NA_character_,
+        is_active = 1L,
+        successor_person_id = NA_character_,
+        stringsAsFactors = FALSE
+      )
+    }
 
     DBI::dbWriteTable(con, "people", new_people, append = TRUE, row.names = FALSE)
   }

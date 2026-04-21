@@ -35,7 +35,7 @@ test_that("read_bundle ingests edges successfully", {
   openxlsx::saveWorkbook(wb, bundle_path, overwrite = TRUE)
 
   # Ingest bundle
-  result <- read_bundle(bundle_path, validate_only = FALSE, backup = FALSE)
+  result <- read_bundle(bundle_path, validate_only = FALSE, backup = FALSE, default_user = "test_user")
 
   # Verify edges were inserted
   con <- DBI::dbConnect(RSQLite::SQLite(), db_info$full_path)
@@ -87,7 +87,7 @@ test_that("edges can reference newly inserted objects", {
   openxlsx::saveWorkbook(wb, bundle_path, overwrite = TRUE)
 
   # Ingest bundle (objects first, then edges in same transaction)
-  result <- read_bundle(bundle_path, validate_only = FALSE, backup = FALSE)
+  result <- read_bundle(bundle_path, validate_only = FALSE, backup = FALSE, default_user = "test_user")
 
   # Verify both were inserted
   con <- DBI::dbConnect(RSQLite::SQLite(), db_info$full_path)
@@ -142,7 +142,7 @@ test_that("edge validation fails with missing parent", {
 
   # Should fail
   expect_error(
-    read_bundle(bundle_path, validate_only = FALSE, backup = FALSE),
+    read_bundle(bundle_path, validate_only = FALSE, backup = FALSE, default_user = "test_user"),
     "Parent IDs not found"
   )
 
@@ -188,7 +188,7 @@ test_that("edge validation fails with invalid edge type", {
 
   # Should fail
   expect_error(
-    read_bundle(bundle_path, validate_only = FALSE, backup = FALSE),
+    read_bundle(bundle_path, validate_only = FALSE, backup = FALSE, default_user = "test_user"),
     "Invalid edge types"
   )
 
@@ -234,7 +234,7 @@ test_that("edge validation fails with incompatible object types", {
 
   # Should fail
   expect_error(
-    read_bundle(bundle_path, validate_only = FALSE, backup = FALSE),
+    read_bundle(bundle_path, validate_only = FALSE, backup = FALSE, default_user = "test_user"),
     "Invalid edge combination"
   )
 
@@ -280,7 +280,7 @@ test_that("edge validation detects duplicates", {
 
   # Should fail
   expect_error(
-    read_bundle(bundle_path, validate_only = FALSE, backup = FALSE),
+    read_bundle(bundle_path, validate_only = FALSE, backup = FALSE, default_user = "test_user"),
     "Duplicate edges"
   )
 

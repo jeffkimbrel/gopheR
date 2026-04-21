@@ -10,6 +10,9 @@
 #' @param overwrite Logical. Whether to overwrite an existing file.
 #' @param hide_spec Logical. If \code{TRUE}, hides the internal \code{spec} sheet.
 #' @param open_bundle Logical. If \code{TRUE}, opens the workbook after creation.
+#' @param people_sheet Logical. If \code{TRUE}, includes a \code{people} sheet
+#'   for adding new people records. The sheet will have headers only; users can
+#'   add as many rows as needed.
 #'
 #' @return Invisibly returns the path to the created Excel file.
 #'
@@ -17,7 +20,10 @@
 #' The \code{spec} worksheet stores allowed values used for dropdown validation
 #' in the data-entry sheets. Users typically do not need to view or edit this sheet.
 #'
-#' Additional sheets and validation rules will be added in future versions.
+#' When \code{people_sheet = TRUE}, a people sheet is included with column headers
+#' only. Users can add new people records. Note that \code{read_bundle()} will only
+#' \strong{insert} new people, not update existing ones. If a person_id already
+#' exists in the database, an error will be raised.
 #'
 #' @export
 #' @importFrom utils browseURL
@@ -26,7 +32,8 @@ write_bundle <- function(out_xlsx,
                          db_path = NULL,
                          overwrite = TRUE,
                          hide_spec = TRUE,
-                         open_bundle = FALSE) {
+                         open_bundle = FALSE,
+                         people_sheet = FALSE) {
 
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop("Package 'openxlsx' is required.")
@@ -40,30 +47,33 @@ write_bundle <- function(out_xlsx,
   openxlsx::addWorksheet(wb, "spec")
 
 
-  # object logic
-  object_cols <- get_table_columns(
-    "object",
-    exclude_cols = c("created_at", "object_subtype")
-  )
+  # people logic (optional, should be first sheet if requested)
+  if (isTRUE(people_sheet)) {
+    people_cols <- get_table_columns(
+      "people",
+      exclude_cols = c("created_at", "is_active")
+    )
 
-  allowed_object_types <- get_object_types()
+    add_bundle_sheet(
+      wb = wb,
+      sheet = "people",
+      cols = people_cols,
+      header_style = header_style
+    )
 
-  add_bundle_sheet(
-    wb = wb,
-    sheet = "object",
-    cols = object_cols,
-    header_style = header_style
-  )
+    # Add comment explaining that new people default to active
+    person_id_col <- match("person_id", people_cols)
+    if (!is.na(person_id_col)) {
+      add_cell_comment(
+        wb = wb,
+        sheet = "people",
+        row = 1,
+        col = person_id_col,
+        comment = "Add new people here. They will be set as active (is_active=1) by default when inserted."
+      )
+    }
+  }
 
-  ## object spec
-  add_spec_dropdown(
-    wb = wb,
-    target_sheet = "object",
-    target_cols = object_cols,
-    target_col_name = "object_type",
-    spec_values = allowed_object_types,
-    spec_name = "object_type"
-  )
 
   # workflow logic
   workflow_cols <- get_table_columns(
@@ -100,6 +110,32 @@ write_bundle <- function(out_xlsx,
     row = 1,
     col = workflow_id_col,
     comment = "Suggested workflow IDs are prefilled below. You may use, increment or replace them. IDs must be unique."
+  )
+
+
+  # object logic
+  object_cols <- get_table_columns(
+    "object",
+    exclude_cols = c("created_at", "object_subtype")
+  )
+
+  allowed_object_types <- get_object_types()
+
+  add_bundle_sheet(
+    wb = wb,
+    sheet = "object",
+    cols = object_cols,
+    header_style = header_style
+  )
+
+  ## object spec
+  add_spec_dropdown(
+    wb = wb,
+    target_sheet = "object",
+    target_cols = object_cols,
+    target_col_name = "object_type",
+    spec_values = allowed_object_types,
+    spec_name = "object_type"
   )
 
 
@@ -209,7 +245,12 @@ write_bundle <- function(out_xlsx,
 
 
   # hide spec sheet
-  openxlsx::activeSheet(wb) <- "object" # spec is likely "active", so need to switch it
+  # Set active sheet to first visible sheet (people if it exists, otherwise workflow)
+  if (isTRUE(people_sheet)) {
+    openxlsx::activeSheet(wb) <- "people"
+  } else {
+    openxlsx::activeSheet(wb) <- "workflow"
+  }
   if (isTRUE(hide_spec)) {
     hide_sheet(wb, "spec")
   }

@@ -9,7 +9,8 @@ write_bundle(
   db_path = NULL,
   overwrite = TRUE,
   hide_spec = TRUE,
-  open_bundle = FALSE
+  open_bundle = FALSE,
+  people_sheet = FALSE
 )
 }
 \arguments{
@@ -23,6 +24,10 @@ If \code{NULL}, the path is resolved via \code{gopher_db_path()}.}
 \item{hide_spec}{Logical. If \code{TRUE}, hides the internal \code{spec} sheet.}
 
 \item{open_bundle}{Logical. If \code{TRUE}, opens the workbook after creation.}
+
+\item{people_sheet}{Logical. If \code{TRUE}, includes a \code{people} sheet
+for adding new people records. The sheet will have headers only; users can
+add as many rows as needed.}
 }
 \value{
 Invisibly returns the path to the created Excel file.
@@ -36,5 +41,8 @@ and a hidden \code{spec} sheet used to populate dropdowns.
 The \code{spec} worksheet stores allowed values used for dropdown validation
 in the data-entry sheets. Users typically do not need to view or edit this sheet.
 
-Additional sheets and validation rules will be added in future versions.
+When \code{people_sheet = TRUE}, a people sheet is included with column headers
+only. Users can add new people records. Note that \code{read_bundle()} will only
+\strong{insert} new people, not update existing ones. If a person_id already
+exists in the database, an error will be raised.
 }

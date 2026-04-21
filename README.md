@@ -56,37 +56,57 @@ You can install the development version of gopheR from [GitHub](https://github.c
 pak::pak("jeffkimbrel/gopheR")
 ```
 
-## Object Validation
+## Key Features
 
-When ingesting objects from an Excel bundle, `read_bundle()` performs the following validation checks **against your database**:
+- 📋 **Excel-based data entry** - Create templates with validated dropdowns
+- ✅ **Two-phase validation** - Pre-flight checks before backup, database validation within transaction
+- 🔄 **Transaction safety** - All-or-nothing ingestion with automatic rollback and backup restore
+- 👥 **People management** - Auto-create from created_by, interactive email prompts, duplicate prevention
+- 🗂️ **Sheet ordering** - Left-to-right workflow (people → workflow → object → edge → results → files)
+- 🚀 **Fast failure** - Pre-flight validation catches issues before expensive operations
+- 🎯 **Database-driven** - No hardcoded types, all validation from database specs
+- 🧪 **Well-tested** - 100+ tests covering validation, ingestion, edge cases
 
-### 1. Object Type Validity
-Checks that all `object_type` values are defined in the database `object_type` table.
+## Validation and Ingestion
 
-**Example types (from starter database):** study, site, sample, readset, assembly, genome, amplicon
+`read_bundle()` performs validation in **two phases** for fast failure and safety:
 
-**Fails if:** An undefined object type is used (e.g., if your database has `genome` but you try to use `bacteria`)
+### Phase 1: Pre-flight Checks (Before Backup)
+Fast validation on bundle content only, no database queries:
 
-### 2. Object Subtype Validity
-Checks that `object_type:object_subtype` combinations are defined in the `object_subtype` table.
+1. **Required Fields** - `created_by` must be filled (or provide `default_user` parameter)
+2. **Duplicate IDs** - No duplicate `workflow_id` or `object_id` within bundle
+3. **Empty Rows** - Filters out template rows (empty description, etc.)
 
-**Example valid combinations (from starter database):**
-- `genome:MAG` (metagenome-assembled genome)
-- `genome:isolate` (isolate genome)
-- `readset:paired_end` (paired-end reads)
-- `assembly:metagenome` (metagenome assembly)
+If any pre-flight check fails, stops immediately without creating backup.
 
-**Fails if:** An invalid combination is used (e.g., `genome:unknown` if that combination isn't in your `object_subtype` table)
+### Phase 2: Database Validation (After Backup, Within Transaction)
+Validates against database specs:
 
-### 3. Duplicates Within Bundle
-Checks that each `object_id` appears only once in the Excel sheet.
+1. **Object Type Validity** - All `object_type` values exist in `object_type` table
+   - Example types: study, site, sample, readset, assembly, genome, amplicon
+   - Fails if undefined type used (e.g., `bacteria` when not in database)
 
-**Fails if:** The same `object_id` appears in multiple rows
+2. **Object Subtype Validity** - `object_type:object_subtype` combinations exist in `object_subtype` table
+   - Example: `genome:MAG`, `genome:isolate`, `readset:paired_end`, `assembly:metagenome`
+   - Fails if invalid combination (e.g., `genome:unknown` if not defined)
 
-### 4. Duplicates Against Database
-Checks that `object_id` values don't already exist in the database.
+3. **Edge Type Validity** - Edge types defined in `edge_spec` table
+   - Example: `assembled_from`, `binned_from`, `sequenced_from`
 
-**Fails if:** Trying to insert an object that already exists
+4. **Edge Compatibility** - Parent/child object type combinations valid per `edge_spec`
+   - Example: `assembled_from` requires `readset` → `assembly`
+   - Fails if wrong types connected (e.g., `genome` → `assembly` with `assembled_from`)
+
+5. **Existing IDs** - No duplicate IDs already in database
+   - Checks `workflow_id`, `object_id`, `person_id`
+
+6. **Reference Integrity** - All referenced IDs exist (in bundle or database)
+   - Edge parent/child must reference valid objects
+   - Edge workflow_id must reference valid workflows
+   - Result/object_file workflow_id and object_id must exist
+
+If any validation fails: transaction rolls back + restores from backup.
 
 ## Design Principles
 
@@ -109,13 +129,41 @@ Checks that `object_id` values don't already exist in the database.
 ### Transaction Safety
 
 All ingestion happens within transactions with automatic rollback:
-1. Create database backup before any changes
-2. Begin transaction
-3. Ingest all sheets (objects, edges, workflows, etc.)
-4. If ANY error occurs: rollback transaction AND restore from backup
-5. If all succeeds: commit transaction
+1. **Pre-flight validation** - Fast checks on bundle content (no database queries)
+2. **Create backup** - Only if pre-flight passes (saves time on obvious errors)
+3. **Begin transaction**
+4. **Database validation** - Check against specs within transaction
+5. **Ingest all sheets** - Order: people → workflows → objects → edges → results → files
+6. **Commit or rollback**:
+   - If ANY error: rollback transaction AND restore from backup
+   - If all succeeds: commit transaction
 
 This ensures all-or-nothing ingestion - no partial data corruption.
+
+**Processing order matters:** People must exist before workflows/objects reference them. Workflows and objects must exist before edges reference them.
+
+### KISS Principle (Keep It Simple, Stupid)
+
+gopheR follows the **Principle of Least Astonishment** - the interface should behave exactly as users expect:
+
+**Excel Sheet Design:**
+- ✅ Sheets ordered left-to-right in fill-out sequence (people → workflow → object → edge)
+- ✅ Only include columns users need to fill (exclude auto-generated fields)
+- ✅ Set sensible defaults automatically (is_active = 1 for new people)
+- ✅ Pre-fill when helpful (workflow IDs), empty when not (people rows)
+- ❌ Don't expose complexity users shouldn't think about
+
+**Validation:**
+- ✅ Fail fast with clear error messages
+- ✅ One error per issue (not cascading errors)
+- ✅ Pre-flight checks before expensive operations
+- ❌ Don't make users guess what went wrong
+
+**People Management:**
+- ✅ Auto-create people from created_by (reduces friction)
+- ✅ Prompt for email to prevent typo-duplicates (interactive guidance)
+- ✅ Warn but allow proceeding (trust the user's judgment)
+- ❌ Don't block workflows with excessive validation
 
 ## Database Schema
 
@@ -141,20 +189,34 @@ See `inst/extdata/starter_db.sqlite` for complete schema with examples.
 ## Key Functions
 
 ### Bundle Writing
-**`write_bundle(out_xlsx, db_path = NULL, ...)`**
+**`write_bundle(out_xlsx, db_path = NULL, people_sheet = FALSE, ...)`**
 - Creates Excel template for data entry
 - Dynamically pulls valid values from database spec tables
-- Creates dropdowns for type selection
-- Prefills workflow IDs
-- Multiple sheets: object, edge, workflow, result, object_file
+- Creates dropdowns for type selection (object types, edge types)
+- Prefills workflow IDs (10 suggested IDs)
+- **Sheet order (left-to-right):** people (optional) → workflow → object → edge → result → object_file
+- `people_sheet = TRUE` adds people sheet for adding new contributors
+  - Columns: person_id, full_name, email, successor_person_id
+  - Excludes is_active (auto-set to 1) and created_at (auto-generated)
 
 ### Bundle Reading
-**`read_bundle(bundle_path, db_path = NULL, validate_only = FALSE, backup = TRUE)`**
-- Validates all data against database specs
-- Creates backup before changes
-- Ingests with transaction safety
-- Returns detailed summary (counts by type, etc.)
-- `validate_only = TRUE` checks without inserting
+**`read_bundle(bundle_path, db_path = NULL, validate_only = FALSE, backup = TRUE, default_user = NULL)`**
+- **Pre-flight validation** before backup (fast fail on obvious errors)
+- Creates backup before changes (only if pre-flight passes)
+- Ingests with transaction safety (all-or-nothing)
+- Returns detailed summary (counts by type, auto-created people, etc.)
+
+**Parameters:**
+- `validate_only = TRUE` - Checks without inserting
+- `backup = FALSE` - Skip backup (faster for testing, not recommended for production)
+- `default_user = "username"` - Fills empty `created_by` fields with this value
+
+**People Management:**
+- People sheet: Insert new people (errors if person_id exists)
+- `created_by` fields: Auto-creates missing people
+  - **Interactive mode:** Prompts for email, warns if email exists
+  - **Non-interactive:** Creates with NA email (scripts, tests)
+- Always sets `is_active = 1` for new people
 
 ### Database Connection
 **`gopher_db_path(path = NULL, db = "gopheR_db.sqlite")`**
@@ -192,51 +254,259 @@ Schema is populated with omics examples (genome, MAG, assembled_from) but these 
 
 ## For gopherDen Developers
 
-When building a gopherDen template:
+When building a gopherDen template, you're creating a **domain-specific implementation** using gopheR as the engine.
 
 ### 1. Database Setup
-- Copy starter database OR create custom schema
-- Customize `object_type`, `object_subtype`, `edge_spec` for your domain
-- Leave schema structure unchanged (table/column names)
+
+Start with `inst/extdata/starter_db.sqlite` from gopheR as a template.
+
+**What You Can Customize:**
+- VALUES in `object_type` table (your domain-specific types)
+  - Example omics: study, site, sample, readset, assembly, genome, amplicon
+  - Example clinical: patient, sample, assay, diagnosis, treatment
+- VALUES in `object_subtype` table (subtypes for each type)
+  - Example: genome:MAG, genome:isolate, readset:paired_end
+- VALUES in `edge_spec` table (relationships and which types they connect)
+  - Example: assembled_from (readset → assembly), binned_from (assembly → genome)
+- VALUES in `key_spec` table (result measurements for your domain)
+  - Example: N50, completeness, contamination, coverage
+
+**What You CANNOT Change:**
+- Table names: `object_type`, `object_subtype`, `edge_spec`, `object`, `edge`, `workflow`, `people`, etc.
+- Column names: `object_id`, `object_type`, `parent_id`, `child_id`, `created_by`, etc.
+- Schema structure (foreign keys, relationships)
+
+**Database Location:**
+```r
+# Store in your package
+inst/extdata/my_domain.sqlite
+
+# Set in .Rprofile or package .onLoad():
+options(gopheR.db_path = system.file("extdata", package = "myGopherDen"))
+options(gopheR.db_file = "my_domain.sqlite")
+```
 
 ### 2. Project Structure
+
 ```r
 gopherDen/
 ├── inst/extdata/
-│   └── my_project.sqlite      # Your database
+│   └── my_domain.sqlite        # Your customized database
+├── data-raw/                   # Scripts to populate spec tables
+│   └── setup_domain_types.R
 ├── reports/                    # Quarto templates
-│   ├── site_summary.qmd
+│   ├── site_summary.qmd       # Domain-specific reports
 │   └── mag_taxonomy.qmd
 ├── shiny/                      # Interactive apps
-│   └── data_explorer/
+│   └── data_explorer/          # Shiny dashboard
+│       ├── app.R
+│       └── modules/
 ├── R/                          # Domain functions
-│   ├── queries.R              # Common SQL
-│   └── plots.R                # Visualizations
-└── analysis/                   # Actual analyses
+│   ├── queries.R              # Common SQL queries
+│   ├── plots.R                # Visualizations
+│   └── analysis.R             # Domain-specific functions
+├── analysis/                   # User-facing analysis scripts
+│   └── examples/
+├── vignettes/                  # How-to guides
+│   └── getting_started.Rmd
+└── README.md                   # Domain-specific instructions
 ```
 
 ### 3. Use gopheR Functions
-```r
-# Set your database location
-options(gopheR.db_path = system.file("extdata", package = "myGopherDen"))
-options(gopheR.db_file = "my_project.sqlite")
 
-# Create bundles for users
-gopheR::write_bundle("data_entry.xlsx")
+All data I/O goes through gopheR:
+
+```r
+# Create bundle for data entry (uses your custom types)
+gopheR::write_bundle("data_entry.xlsx", people_sheet = TRUE)
 
 # Ingest completed bundles
-gopheR::read_bundle("completed_bundle.xlsx")
+results <- gopheR::read_bundle("completed_bundle.xlsx", default_user = "lab_manager")
+
+# Query with your domain knowledge
+con <- gopheR::gopher_con()
+my_genomes <- DBI::dbGetQuery(con, "
+  SELECT object_id, label 
+  FROM object 
+  WHERE object_type = 'genome' AND object_subtype = 'MAG'
+")
+DBI::dbDisconnect(con)
 ```
 
 ### 4. Add Domain Features
-- Quarto reports using your custom types
-- Shiny dashboards with domain-specific queries
-- LLM integration (querychat/elmer) for natural language queries
-- Analysis workflows specific to your science
 
-**Remember:** gopheR is generic. ALL domain knowledge goes in your Den.
+**Quarto Reports:**
+- Use your custom object/edge types in queries
+- Generate domain-specific visualizations
+- Example: MAG quality summaries, sample provenance traces
 
-## Example Workflow
+**Shiny Dashboards:**
+- Interactive exploration of your data
+- Dynamic filtering by your custom types
+- Network visualization of edges
+
+**LLM Integration (querychat/elmer):**
+- Natural language queries over your database
+- Example: "Show me all high-quality MAGs from Site A"
+- LLM knows your custom types and relationships
+
+**Domain Functions:**
+- Write helper functions for common queries
+- Example: `get_mags_by_site()`, `trace_sample_provenance()`
+- Keep domain logic in gopherDen, not gopheR
+
+### 5. Critical Architecture Rules
+
+**✅ DO:**
+- Trust gopheR for all validation and ingestion
+- Use gopheR functions (`read_bundle`, `write_bundle`, `gopher_con`)
+- Define domain types in your database
+- Write domain-specific queries and reports
+- Document your custom types and workflows
+
+**❌ DON'T:**
+- Modify gopheR package code
+- Hardcode object types in your code (query from database)
+- Bypass gopheR's validation
+- Store data outside the gopheR database schema
+- Mix domain logic into gopheR
+
+### 6. Example Domain Customization
+
+**Omics Project (MAGs):**
+```r
+# object_type: study, site, sample, readset, assembly, genome, amplicon
+# object_subtype: genome:MAG, genome:isolate, readset:paired_end
+# edge_spec: sequenced_from, assembled_from, binned_from
+# Reports: MAG quality, taxonomy, abundance across sites
+```
+
+**Clinical Project:**
+```r
+# object_type: patient, sample, assay, diagnosis, treatment
+# object_subtype: sample:blood, sample:tissue, assay:RNAseq
+# edge_spec: sampled_from, derived_from, diagnosed_with
+# Reports: Patient timelines, treatment outcomes, sample tracking
+```
+
+### 7. Testing Your Den
+
+```r
+# Test bundle creation
+bundle_path <- tempfile(fileext = ".xlsx")
+gopheR::write_bundle(bundle_path)
+
+# Verify sheets have your custom types in dropdowns
+wb <- openxlsx::loadWorkbook(bundle_path)
+# Check that object_type dropdown has your types
+
+# Test ingestion with sample data
+gopheR::read_bundle("test_data.xlsx", validate_only = TRUE)
+```
+
+**Remember:** gopheR is the framework, gopherDen is the application. ALL domain knowledge (types, reports, analyses) lives in your Den, not in gopheR.
+
+## Quick Reference
+
+### Common Patterns
+
+**Setup database path:**
+```r
+options(gopheR.db_path = "/path/to/database/folder")
+options(gopheR.db_file = "my_db.sqlite")
+```
+
+**Create bundle with people sheet:**
+```r
+gopheR::write_bundle("data.xlsx", people_sheet = TRUE)
+```
+
+**Read bundle with default user:**
+```r
+gopheR::read_bundle("data.xlsx", default_user = "jkimbrel")
+```
+
+**Validation only (dry run):**
+```r
+gopheR::read_bundle("data.xlsx", validate_only = TRUE, default_user = "jkimbrel")
+```
+
+**Query database:**
+```r
+gopheR::with_gopher_con(function(con) {
+  DBI::dbGetQuery(con, "SELECT * FROM object WHERE object_type = 'genome'")
+})
+```
+
+### Common Gotchas
+
+❌ **Don't hardcode types:**
+```r
+# BAD - breaks when gopherDen uses different types
+if (object_type == "genome") { ... }
+```
+
+✅ **Query from database:**
+```r
+# GOOD - works with any gopherDen
+valid_types <- DBI::dbGetQuery(con, "SELECT object_type FROM object_type")
+if (object_type %in% valid_types$object_type) { ... }
+```
+
+❌ **Don't pass full file path to db_path:**
+```r
+# BAD - db_path should be DIRECTORY
+gopher_con(db_path = "/path/to/db.sqlite")
+```
+
+✅ **Pass directory only:**
+```r
+# GOOD - directory containing the database
+options(gopheR.db_path = "/path/to/database")
+options(gopheR.db_file = "db.sqlite")
+gopher_con()  # Uses options
+```
+
+❌ **Don't modify bundles via gopheR:**
+```r
+# BAD - gopheR is insert-only
+# No update/delete functionality for safety
+```
+
+✅ **Use SQL for updates (outside gopheR):**
+```r
+# GOOD - manual SQL for corrections
+con <- gopheR::gopher_con(read_only = FALSE)
+DBI::dbExecute(con, "UPDATE object SET label = 'New Label' WHERE object_id = 'obj001'")
+DBI::dbDisconnect(con)
+```
+
+### Data Flow
+
+```
+1. User creates bundle:     write_bundle() → Excel file
+2. User fills Excel:        Manual data entry
+3. Pre-flight validation:   Fast checks (no DB)
+4. Backup creation:         Safety checkpoint
+5. Database validation:     Deep checks (with DB)
+6. Transaction ingestion:   All sheets processed
+7. Commit or rollback:      Success or restore backup
+```
+
+### Sheet Processing Order
+
+```
+people       → Must exist before workflows/objects reference them
+workflows    → Must exist before edges/results reference them
+objects      → Must exist before edges reference them
+edges        → References objects and workflows
+results      → References objects and workflows
+object_files → References objects and workflows
+```
+
+## Example Workflows
+
+### Basic Workflow
 
 ``` r
 library(gopheR)
@@ -254,12 +524,53 @@ write_bundle("data_entry_template.xlsx")
 read_bundle("completed_data.xlsx", validate_only = TRUE)
 
 # Insert validated data (with backup + transaction)
-results <- read_bundle("completed_data.xlsx", validate_only = FALSE)
+results <- read_bundle("completed_data.xlsx")
 
 # Check summary
 results$results$objects
 # $n_processed: 15
 # $n_inserted: 15
 # $by_type: list(genome = 8, readset = 6, assembly = 1)
+```
+
+### Including People Sheet
+
+``` r
+# Create bundle with people sheet for adding new contributors
+write_bundle("data_entry.xlsx", people_sheet = TRUE)
+
+# User fills in people, workflows, objects, edges...
+
+# If user forgot to fill created_by fields, provide default
+results <- read_bundle("data_entry.xlsx", default_user = "jkimbrel")
+# ℹ Filled 5 empty workflow created_by field(s) with 'jkimbrel'
+# ℹ Filled 12 empty object created_by field(s) with 'jkimbrel'
+
+# New people detected in created_by will prompt for email:
+# New user 'alice' detected in bundle.
+# Enter email address for 'alice': alice@example.com
+# (checks for duplicate emails and warns if found)
+```
+
+### Pre-flight Validation Failures
+
+``` r
+# Fast failure - stops before backup if issues found
+read_bundle("incomplete_data.xlsx")
+# ✖ Pre-flight validation failed:
+#   - Workflow sheet has 3 row(s) with empty created_by field.
+#     Provide default_user parameter or fill in Excel.
+#   - Duplicate object_ids in bundle: obj_001, obj_005
+
+# No backup created, no database touched - fix and retry
+```
+
+### Validation-Only Mode
+
+``` r
+# Check data quality without committing
+read_bundle("data.xlsx", validate_only = TRUE, default_user = "jkimbrel")
+# ✔ All validations passed (no insertion)
+# ✔ Would insert 15 objects, 8 edges, 2 workflows
 ```
 

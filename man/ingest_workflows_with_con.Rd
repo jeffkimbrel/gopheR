@@ -4,7 +4,12 @@
 \alias{ingest_workflows_with_con}
 \title{Ingest workflows from bundle worksheet (with existing connection)}
 \usage{
-ingest_workflows_with_con(wb, con, validate_only = FALSE)
+ingest_workflows_with_con(
+  wb,
+  con,
+  validate_only = FALSE,
+  preflight_data = NULL
+)
 }
 \arguments{
 \item{wb}{An openxlsx workbook object.}

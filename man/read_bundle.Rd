@@ -9,6 +9,7 @@ read_bundle(
   db_path = NULL,
   backup = TRUE,
   validate_only = FALSE,
+  default_user = NULL,
   ...
 )
 }
@@ -25,6 +26,10 @@ restoration if any error occurs during ingestion.}
 
 \item{validate_only}{Logical. If \code{TRUE}, validates the bundle without
 inserting any data. Useful for checking data quality before committing.}
+
+\item{default_user}{Optional character scalar. If provided, will be used to
+fill any empty \code{created_by} fields in workflows and objects. If not
+provided and empty \code{created_by} fields are found, an error is raised.}
 
 \item{...}{Additional arguments (currently unused).}
 }
@@ -45,10 +50,11 @@ within a transaction with automatic rollback on error.
 \details{
 The function performs the following steps:
 \enumerate{
-\item Creates a database backup (unless \code{backup = FALSE} or \code{validate_only = TRUE})
 \item Loads the Excel workbook
+\item Performs pre-flight validation (duplicates, required fields, created_by)
+\item Creates a database backup (unless \code{backup = FALSE} or \code{validate_only = TRUE})
 \item Begins a database transaction
-\item Validates and ingests each sheet (currently: objects)
+\item Validates and ingests each sheet (workflows, objects, edges)
 \item If any error occurs: rolls back transaction and restores from backup
 \item If all succeeds: commits transaction
 }
@@ -64,8 +70,8 @@ options(gopheR.db_path = "/path/to/database/folder")
 # Validate without inserting
 read_bundle("my_data.xlsx", validate_only = TRUE)
 
-# Insert validated data
-results <- read_bundle("my_data.xlsx")
+# Insert validated data with default user
+results <- read_bundle("my_data.xlsx", default_user = "jkimbrel")
 results$results$objects  # Check what was inserted
 }
 
