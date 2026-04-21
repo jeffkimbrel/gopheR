@@ -62,10 +62,12 @@ pak::pak("jeffkimbrel/gopheR")
 - ✅ **Two-phase validation** - Pre-flight checks before backup, database validation within transaction
 - 🔄 **Transaction safety** - All-or-nothing ingestion with automatic rollback and backup restore
 - 👥 **People management** - Auto-create from created_by, interactive email prompts, duplicate prevention
-- 🗂️ **Sheet ordering** - Left-to-right workflow (people → workflow → object → edge → results → files)
+- 🗂️ **Sheet ordering** - Left-to-right workflow (people → workflow → object → edge → result → object_file)
+- 📊 **Result tracking** - Append-only history for measurements (completeness, taxonomy, N50, etc.)
+- 📁 **File manifest** - Track data files on disk (FASTA, FASTQ, annotations) with checksums
 - 🚀 **Fast failure** - Pre-flight validation catches issues before expensive operations
 - 🎯 **Database-driven** - No hardcoded types, all validation from database specs
-- 🧪 **Well-tested** - 100+ tests covering validation, ingestion, edge cases
+- 🧪 **Well-tested** - 45 tests with 114 passing assertions (full coverage of validation and ingestion)
 
 ## Validation and Ingestion
 
@@ -104,7 +106,21 @@ Validates against database specs:
 6. **Reference Integrity** - All referenced IDs exist (in bundle or database)
    - Edge parent/child must reference valid objects
    - Edge workflow_id must reference valid workflows
-   - Result/object_file workflow_id and object_id must exist
+   - Result object_id and workflow_id must reference valid objects/workflows
+   - Object_file object_id and workflow_id must reference valid objects/workflows
+
+7. **Result Key Validity** - Result keys defined in `key_spec` table
+   - Example keys: completeness, contamination, N50, pH, GTDB_taxonomy
+   - Fails if undefined key used (e.g., "KEGG" if not in key_spec)
+   - **Note:** Multiple rows per object_id + key allowed (append-only history)
+
+8. **Object_file Role Validity** - File roles defined in `object_file_type_spec` for that object_type
+   - Example: genome can have genome_fasta, protein_fasta, annotation_gff
+   - Fails if wrong role for type (e.g., fastq_r1 for genome, should be for readset)
+
+9. **File Path Uniqueness** - file_path must be unique across database
+   - Prevents pointing multiple records to same physical file
+   - Fails if path already in database or duplicated in bundle
 
 If any validation fails: transaction rolls back + restores from backup.
 
@@ -180,9 +196,37 @@ gopheR expects the following table structure:
 - `object` - Your actual datasets/samples/entities
 - `edge` - Relationships between objects
 - `workflow` - Processing workflows/pipelines
-- `result` - Measurements, statistics, quality metrics
-- `object_file` - File paths and metadata
 - `people` - Contributors and authors
+- `result` - Queryable measurements/metrics (append-only history)
+- `object_file` - File manifest (pointers to data on disk)
+
+### Understanding Result vs Object_file
+
+**Why two separate tables?**
+
+**`result` table** - Queryable properties **in the database**:
+- Small, queryable data you want to filter on
+- Example: completeness (95.2%), contamination (2.1%), pH (7.5), GTDB taxonomy
+- Enables queries: "All MAGs with completeness > 90%", "Proteobacteria from pH > 7 soils"
+- **Append-only history**: Multiple rows per object_id + key allowed
+  - Example: MAG_001 has GTDB taxonomy from 2022 workflow AND 2025 workflow
+  - Preserves "truth at the time" - taxonomy changes over time but history remains
+- Keys constrained by `key_spec` table (controlled vocabulary)
+
+**`object_file` table** - File manifest **pointing to disk**:
+- Large data files you don't want in the database
+- Example: genome.fasta (50MB), reads_R1.fastq (5GB), annotation.gff (10MB)
+- Tracks: where it is (file_path), what it is (file_role), integrity (checksum)
+- Database stays lightweight (metadata only), heavy data stays on disk
+- File roles constrained by `object_file_type_spec` for each object_type
+  - Example: genome can have genome_fasta, protein_fasta, annotation_gff
+  - Example: readset can have fastq_r1, fastq_r2
+
+**Design philosophy:**
+- Database = catalog/index with queryable metadata
+- Disk = actual data files
+- Result = IN database (small, queryable)
+- Object_file = ON disk (large, referenced)
 
 See `inst/extdata/starter_db.sqlite` for complete schema with examples.
 
@@ -572,5 +616,43 @@ read_bundle("incomplete_data.xlsx")
 read_bundle("data.xlsx", validate_only = TRUE, default_user = "jkimbrel")
 # ✔ All validations passed (no insertion)
 # ✔ Would insert 15 objects, 8 edges, 2 workflows
+```
+
+### Including Result and Object_file Sheets
+
+``` r
+# Create bundle with all sheets
+write_bundle("full_bundle.xlsx", people_sheet = TRUE)
+
+# User fills all sheets with:
+# - People: contributors
+# - Workflows: GTDB r214 (2025), CheckM v2
+# - Objects: MAG genomes
+# - Edges: binned_from relationships
+# - Result: completeness, contamination, GTDB taxonomy for each MAG
+# - Object_file: paths to genome.fasta, protein.fasta, annotation.gff files
+
+# Ingest everything
+results <- read_bundle("full_bundle.xlsx", default_user = "jkimbrel")
+
+# Query results (append-only history)
+con <- gopheR::gopher_con()
+taxonomy_history <- DBI::dbGetQuery(con, "
+  SELECT r.object_id, r.workflow_id, r.value, w.workflow_date
+  FROM result r
+  JOIN workflow w ON r.workflow_id = w.workflow_id
+  WHERE r.key = 'GTDB_taxonomy'
+  ORDER BY r.object_id, w.workflow_date
+")
+# Shows taxonomy evolution over time
+
+# Get file paths
+files <- DBI::dbGetQuery(con, "
+  SELECT object_id, file_role, file_path, checksum
+  FROM object_file
+  WHERE object_id = 'MAG_001'
+")
+# Returns paths to genome FASTA, proteins, annotations
+DBI::dbDisconnect(con)
 ```
 

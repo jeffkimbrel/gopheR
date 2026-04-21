@@ -282,6 +282,20 @@ read_bundle <- function(bundle_path,
             results$edges <- NULL
           }
 
+          # Process result sheet (after objects and workflows exist)
+          if ("result" %in% sheet_names) {
+            results$results_data <- ingest_results_with_con(wb, con, validate_only = validate_only)
+          } else {
+            results$results_data <- NULL
+          }
+
+          # Process object_file sheet (after objects and workflows exist)
+          if ("object_file" %in% sheet_names) {
+            results$object_files <- ingest_object_files_with_con(wb, con, validate_only = validate_only)
+          } else {
+            results$object_files <- NULL
+          }
+
           # Commit transaction if not validate_only
           if (!isTRUE(validate_only)) {
             DBI::dbCommit(con)
@@ -1526,4 +1540,375 @@ insert_edges_with_con <- function(edge_data, con) {
   )
 
   invisible(nrow(insert_data))
+}
+
+
+#' Ingest results from bundle worksheet (with existing connection)
+#'
+#' Reads the result sheet from an Excel bundle, validates the data, and
+#' optionally inserts it into the database using an existing connection.
+#'
+#' @param wb openxlsx workbook object
+#' @param con A DBI connection to the database
+#' @param validate_only Logical; if TRUE, validation only (no insertion)
+#'
+#' @return List with n_processed and n_inserted counts
+#' @keywords internal
+ingest_results_with_con <- function(wb, con, validate_only = FALSE) {
+
+  # Read the result sheet
+  result_data <- openxlsx::read.xlsx(wb, sheet = "result")
+
+  if (is.null(result_data) || nrow(result_data) == 0) {
+    cli::cli_alert_warning("Result sheet is empty. Skipping.")
+    return(list(
+      n_processed = 0,
+      n_inserted = 0,
+      validation_passed = TRUE
+    ))
+  }
+
+  # Filter out empty rows
+  result_data <- result_data |>
+    dplyr::filter(
+      !is.na(.data$object_id) & nzchar(.data$object_id),
+      !is.na(.data$key) & nzchar(.data$key)
+    )
+
+  if (nrow(result_data) == 0) {
+    cli::cli_alert_warning("Result sheet has no valid entries. Skipping.")
+    return(list(
+      n_processed = 0,
+      n_inserted = 0,
+      validation_passed = TRUE
+    ))
+  }
+
+  cli::cli_alert_info("Found {nrow(result_data)} result(s) in bundle.")
+
+  # Validate
+  validation_result <- validate_results_with_con(result_data, con)
+  if (!validation_result$valid) {
+    cli::cli_abort(validation_result$message)
+  }
+
+  # Insert results
+  if (!isTRUE(validate_only)) {
+    n_inserted <- insert_results_with_con(result_data, con)
+    cli::cli_alert_success("Inserted {n_inserted} result(s) into database.")
+  } else {
+    n_inserted <- 0
+  }
+
+  list(
+    n_processed = nrow(result_data),
+    n_inserted = n_inserted,
+    validation_passed = TRUE
+  )
+}
+
+
+#' Validate results against database (with connection)
+#'
+#' Checks that object_id and workflow_id references exist, and that keys
+#' are valid per key_spec table.
+#'
+#' @param result_data Data frame of results to validate
+#' @param con A DBI connection to the database
+#'
+#' @return List with valid (logical) and message (character) elements
+#' @keywords internal
+validate_results_with_con <- function(result_data, con) {
+
+  errors <- character()
+
+  # Get all objects (from DB + any in current transaction)
+  all_objects <- DBI::dbReadTable(con, "object")
+
+  # Get all workflows (from DB + any in current transaction)
+  all_workflows <- DBI::dbReadTable(con, "workflow")
+
+  # Get valid keys from key_spec
+  key_spec <- DBI::dbReadTable(con, "key_spec")
+
+  # Check 1: object_id must exist
+  missing_objects <- setdiff(result_data$object_id, all_objects$object_id)
+  if (length(missing_objects) > 0) {
+    errors <- c(errors, sprintf(
+      "Result object_ids not found: %s",
+      paste(missing_objects, collapse = ", ")
+    ))
+  }
+
+  # Check 2: workflow_id must exist
+  missing_workflows <- setdiff(result_data$workflow_id, all_workflows$workflow_id)
+  if (length(missing_workflows) > 0) {
+    errors <- c(errors, sprintf(
+      "Result workflow_ids not found: %s",
+      paste(missing_workflows, collapse = ", ")
+    ))
+  }
+
+  # Check 3: Keys must be valid per key_spec
+  invalid_keys <- result_data |>
+    dplyr::anti_join(key_spec, by = "key") |>
+    dplyr::pull(.data$key) |>
+    unique()
+
+  if (length(invalid_keys) > 0) {
+    valid_keys <- unique(key_spec$key)
+    errors <- c(errors, sprintf(
+      "Invalid result keys: %s\nValid keys: %s",
+      paste(invalid_keys, collapse = ", "),
+      paste(valid_keys, collapse = ", ")
+    ))
+  }
+
+  if (length(errors) > 0) {
+    return(list(valid = FALSE, message = paste(errors, collapse = "\n")))
+  }
+
+  list(valid = TRUE, message = "Result validation passed")
+}
+
+
+#' Insert results into database (with connection)
+#'
+#' Inserts validated result records into the result table.
+#'
+#' @param result_data Data frame of results to insert
+#' @param con A DBI connection to the database
+#'
+#' @return Number of rows inserted
+#' @keywords internal
+insert_results_with_con <- function(result_data, con) {
+
+  # Select columns for insertion (exclude result_id, it's auto-generated)
+  db_cols <- DBI::dbListFields(con, "result")
+  db_cols <- db_cols[db_cols != "result_id"]
+
+  insert_cols <- intersect(names(result_data), db_cols)
+  insert_data <- result_data[, insert_cols, drop = FALSE]
+
+  # Insert into database
+  DBI::dbWriteTable(
+    con,
+    "result",
+    insert_data,
+    append = TRUE,
+    row.names = FALSE
+  )
+
+  nrow(insert_data)
+}
+
+
+#' Ingest object_files from bundle worksheet (with existing connection)
+#'
+#' Reads the object_file sheet from an Excel bundle, validates the data, and
+#' optionally inserts it into the database using an existing connection.
+#'
+#' @param wb openxlsx workbook object
+#' @param con A DBI connection to the database
+#' @param validate_only Logical; if TRUE, validation only (no insertion)
+#'
+#' @return List with n_processed and n_inserted counts
+#' @keywords internal
+ingest_object_files_with_con <- function(wb, con, validate_only = FALSE) {
+
+  # Read the object_file sheet
+  file_data <- openxlsx::read.xlsx(wb, sheet = "object_file")
+
+  if (is.null(file_data) || nrow(file_data) == 0) {
+    cli::cli_alert_warning("Object_file sheet is empty. Skipping.")
+    return(list(
+      n_processed = 0,
+      n_inserted = 0,
+      validation_passed = TRUE
+    ))
+  }
+
+  # Filter out empty rows
+  file_data <- file_data |>
+    dplyr::filter(
+      !is.na(.data$object_id) & nzchar(.data$object_id),
+      !is.na(.data$file_role) & nzchar(.data$file_role),
+      !is.na(.data$file_path) & nzchar(.data$file_path)
+    )
+
+  if (nrow(file_data) == 0) {
+    cli::cli_alert_warning("Object_file sheet has no valid entries. Skipping.")
+    return(list(
+      n_processed = 0,
+      n_inserted = 0,
+      validation_passed = TRUE
+    ))
+  }
+
+  cli::cli_alert_info("Found {nrow(file_data)} object_file(s) in bundle.")
+
+  # Validate
+  validation_result <- validate_object_files_with_con(file_data, con)
+  if (!validation_result$valid) {
+    cli::cli_abort(validation_result$message)
+  }
+
+  # Insert files
+  if (!isTRUE(validate_only)) {
+    n_inserted <- insert_object_files_with_con(file_data, con)
+    cli::cli_alert_success("Inserted {n_inserted} object_file(s) into database.")
+  } else {
+    n_inserted <- 0
+  }
+
+  list(
+    n_processed = nrow(file_data),
+    n_inserted = n_inserted,
+    validation_passed = TRUE
+  )
+}
+
+
+#' Validate object_files against database (with connection)
+#'
+#' Checks that object_id and workflow_id references exist, file_role is valid
+#' for the object_type, and file_path is unique.
+#'
+#' @param file_data Data frame of object_files to validate
+#' @param con A DBI connection to the database
+#'
+#' @return List with valid (logical) and message (character) elements
+#' @keywords internal
+validate_object_files_with_con <- function(file_data, con) {
+
+  errors <- character()
+
+  # Get all objects (from DB + any in current transaction)
+  all_objects <- DBI::dbReadTable(con, "object")
+
+  # Get all workflows (from DB + any in current transaction) if workflow_id used
+  all_workflows <- DBI::dbReadTable(con, "workflow")
+
+  # Get file role spec
+  file_role_spec <- DBI::dbReadTable(con, "object_file_type_spec")
+
+  # Get existing file paths
+  existing_files <- DBI::dbReadTable(con, "object_file")
+
+  # Check 1: object_id must exist
+  missing_objects <- setdiff(file_data$object_id, all_objects$object_id)
+  if (length(missing_objects) > 0) {
+    errors <- c(errors, sprintf(
+      "Object_file object_ids not found: %s",
+      paste(missing_objects, collapse = ", ")
+    ))
+  }
+
+  # Check 2: workflow_id must exist (if provided)
+  if ("workflow_id" %in% names(file_data)) {
+    provided_workflows <- file_data$workflow_id[!is.na(file_data$workflow_id) & nzchar(file_data$workflow_id)]
+    if (length(provided_workflows) > 0) {
+      missing_workflows <- setdiff(provided_workflows, all_workflows$workflow_id)
+      if (length(missing_workflows) > 0) {
+        errors <- c(errors, sprintf(
+          "Object_file workflow_ids not found: %s",
+          paste(missing_workflows, collapse = ", ")
+        ))
+      }
+    }
+  }
+
+  # Check 3: file_role must be valid for object_type
+  # Join with objects to get object_type, then check against spec
+  files_with_type <- file_data |>
+    dplyr::left_join(
+      all_objects |> dplyr::select("object_id", "object_type"),
+      by = "object_id"
+    )
+
+  invalid_roles <- files_with_type |>
+    dplyr::anti_join(
+      file_role_spec,
+      by = c("object_type", "file_role")
+    )
+
+  if (nrow(invalid_roles) > 0) {
+    # Group by object_type to show what's valid for each type
+    invalid_summary <- invalid_roles |>
+      dplyr::distinct(.data$object_type, .data$file_role)
+
+    for (i in seq_len(nrow(invalid_summary))) {
+      obj_type <- invalid_summary$object_type[i]
+      bad_role <- invalid_summary$file_role[i]
+
+      valid_for_type <- file_role_spec |>
+        dplyr::filter(.data$object_type == obj_type) |>
+        dplyr::pull(.data$file_role)
+
+      errors <- c(errors, sprintf(
+        "Invalid file_role '%s' for object_type '%s'\nValid roles for %s: %s",
+        bad_role,
+        obj_type,
+        obj_type,
+        paste(valid_for_type, collapse = ", ")
+      ))
+    }
+  }
+
+  # Check 4: file_path must be unique (not already in DB)
+  if (nrow(existing_files) > 0) {
+    duplicate_paths <- intersect(file_data$file_path, existing_files$file_path)
+    if (length(duplicate_paths) > 0) {
+      errors <- c(errors, sprintf(
+        "Duplicate file_path already in database: %s",
+        paste(duplicate_paths, collapse = ", ")
+      ))
+    }
+  }
+
+  # Check 5: file_path must be unique within bundle
+  dup_paths_in_bundle <- file_data$file_path[duplicated(file_data$file_path)]
+  if (length(dup_paths_in_bundle) > 0) {
+    errors <- c(errors, sprintf(
+      "Duplicate file_path in bundle: %s",
+      paste(dup_paths_in_bundle, collapse = ", ")
+    ))
+  }
+
+  if (length(errors) > 0) {
+    return(list(valid = FALSE, message = paste(errors, collapse = "\n")))
+  }
+
+  list(valid = TRUE, message = "Object_file validation passed")
+}
+
+
+#' Insert object_files into database (with connection)
+#'
+#' Inserts validated object_file records into the object_file table.
+#'
+#' @param file_data Data frame of object_files to insert
+#' @param con A DBI connection to the database
+#'
+#' @return Number of rows inserted
+#' @keywords internal
+insert_object_files_with_con <- function(file_data, con) {
+
+  # Select columns for insertion (exclude object_file_id, it's auto-generated)
+  db_cols <- DBI::dbListFields(con, "object_file")
+  db_cols <- db_cols[db_cols != "object_file_id"]
+
+  insert_cols <- intersect(names(file_data), db_cols)
+  insert_data <- file_data[, insert_cols, drop = FALSE]
+
+  # Insert into database
+  DBI::dbWriteTable(
+    con,
+    "object_file",
+    insert_data,
+    append = TRUE,
+    row.names = FALSE
+  )
+
+  nrow(insert_data)
 }
