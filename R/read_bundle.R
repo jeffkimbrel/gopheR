@@ -92,24 +92,43 @@ read_bundle <- function(bundle_path,
           # Initialize results list
           results <- list()
 
+          # Track auto-created people for warning at end
+          auto_created_people <- character()
+
+          # Process workflow sheet (must come before edges/objects that reference it)
+          if ("workflow" %in% sheet_names) {
+            workflow_result <- ingest_workflows_with_con(wb, con, validate_only = validate_only)
+            results$workflows <- workflow_result$results
+            auto_created_people <- c(auto_created_people, workflow_result$auto_created_people)
+          } else {
+            results$workflows <- NULL
+          }
+
           # Process object sheet
           if ("object" %in% sheet_names) {
-            results$objects <- ingest_objects_with_con(wb, con, validate_only = validate_only)
+            obj_result <- ingest_objects_with_con(wb, con, validate_only = validate_only)
+            results$objects <- obj_result
+            auto_created_people <- c(auto_created_people, obj_result$auto_created_people)
           } else {
             cli::cli_alert_warning("No 'object' sheet found in bundle.")
             results$objects <- NULL
           }
 
-          # Future: process other sheets (edges, workflows, etc.)
-          # if ("edge" %in% sheet_names) {
-          #   results$edges <- ingest_edges_with_con(wb, con, validate_only = validate_only)
-          # }
+          # Process edge sheet (after objects so they can reference new objects)
+          if ("edge" %in% sheet_names) {
+            results$edges <- ingest_edges_with_con(wb, con, validate_only = validate_only)
+          } else {
+            results$edges <- NULL
+          }
 
           # Commit transaction if not validate_only
           if (!isTRUE(validate_only)) {
             DBI::dbCommit(con)
             cli::cli_alert_success("All changes committed to database.")
           }
+
+          # Add auto-created people list to results
+          results$auto_created_people <- auto_created_people
 
           results
         },
@@ -154,6 +173,15 @@ read_bundle <- function(bundle_path,
   # Print summary report
   print_ingestion_summary(ingestion_result, validate_only = validate_only)
 
+  # Warn about auto-created people
+  if (!is.null(ingestion_result$auto_created_people) &&
+      length(ingestion_result$auto_created_people) > 0) {
+    cli::cli_alert_warning(
+      "Auto-created {length(ingestion_result$auto_created_people)} person/people with minimal info: {.val {ingestion_result$auto_created_people}}"
+    )
+    cli::cli_alert_info("Please update their full_name and email in the people table.")
+  }
+
   invisible(list(
     bundle_path = normalizePath(bundle_path, mustWork = TRUE),
     db_path = normalizePath(db_path, mustWork = TRUE),
@@ -188,7 +216,8 @@ ingest_objects_with_con <- function(wb, con, validate_only = FALSE) {
       n_processed = 0,
       n_inserted = 0,
       by_type = list(),
-      validation_passed = TRUE
+      validation_passed = TRUE,
+      auto_created_people = character()
     ))
   }
 
@@ -204,6 +233,12 @@ ingest_objects_with_con <- function(wb, con, validate_only = FALSE) {
 
   # Split object_type into object_type and object_subtype
   object_data <- split_object_type(object_data)
+
+  # Auto-create missing people if created_by is provided
+  auto_created_people <- character()
+  if ("created_by" %in% names(object_data)) {
+    auto_created_people <- auto_create_people(object_data$created_by, con, validate_only)
+  }
 
   # Validate against database specs
   validation_results <- validate_objects_with_con(object_data, con)
@@ -237,7 +272,8 @@ ingest_objects_with_con <- function(wb, con, validate_only = FALSE) {
     n_processed = nrow(object_data),
     n_inserted = n_inserted,
     by_type = by_type,
-    validation_passed = TRUE
+    validation_passed = TRUE,
+    auto_created_people = auto_created_people
   )
 }
 
@@ -419,6 +455,19 @@ print_ingestion_summary <- function(results, validate_only = FALSE) {
 
   cli::cli_h2("Ingestion Summary")
 
+  # Workflows summary
+  if (!is.null(results$workflows)) {
+    wf_res <- results$workflows
+
+    if (wf_res$n_processed > 0) {
+      if (isTRUE(validate_only)) {
+        cli::cli_alert_info("Workflows validated: {wf_res$n_processed}")
+      } else {
+        cli::cli_alert_success("Workflows inserted: {wf_res$n_inserted}")
+      }
+    }
+  }
+
   # Objects summary
   if (!is.null(results$objects)) {
     obj_res <- results$objects
@@ -442,9 +491,297 @@ print_ingestion_summary <- function(results, validate_only = FALSE) {
     }
   }
 
-  # Future: edges, workflows, etc.
+  # Edges summary
+  if (!is.null(results$edges)) {
+    edge_res <- results$edges
+
+    if (edge_res$n_processed > 0) {
+      if (isTRUE(validate_only)) {
+        cli::cli_alert_info("Edges validated: {edge_res$n_processed}")
+      } else {
+        cli::cli_alert_success("Edges inserted: {edge_res$n_inserted}")
+      }
+
+      # Show breakdown by type
+      if (length(edge_res$by_type) > 0) {
+        type_summary <- purrr::map2_chr(
+          names(edge_res$by_type),
+          edge_res$by_type,
+          ~ paste0(.y, " ", .x)
+        )
+        cli::cli_bullets(c("*" = paste(type_summary, collapse = ", ")))
+      }
+    }
+  }
 
   invisible(NULL)
+}
+
+
+#' Ingest workflows from bundle worksheet (with existing connection)
+#'
+#' Reads the workflow sheet from an Excel bundle, validates the data, and
+#' optionally inserts it into the database using an existing connection.
+#'
+#' @param wb An openxlsx workbook object.
+#' @param con A DBI connection to the database.
+#' @param validate_only Logical. If TRUE, only validates without inserting.
+#'
+#' @return List with results and auto_created_people.
+#' @keywords internal
+#' @importFrom rlang .data
+
+ingest_workflows_with_con <- function(wb, con, validate_only = FALSE) {
+
+  # Read the workflow sheet
+  workflow_data <- openxlsx::read.xlsx(wb, sheet = "workflow")
+
+  if (is.null(workflow_data) || nrow(workflow_data) == 0) {
+    cli::cli_alert_warning("Workflow sheet is empty. Skipping.")
+    return(list(
+      results = list(
+        n_processed = 0,
+        n_inserted = 0,
+        validation_passed = TRUE
+      ),
+      auto_created_people = character()
+    ))
+  }
+
+  # Filter out empty rows (where description is NA/empty)
+  workflow_data <- workflow_data |>
+    dplyr::filter(
+      !is.na(.data$workflow_id),
+      nzchar(.data$workflow_id),
+      !is.na(.data$description),
+      nzchar(.data$description)
+    )
+
+  if (nrow(workflow_data) == 0) {
+    cli::cli_alert_warning("Workflow sheet has no rows with both workflow_id and description. Skipping.")
+    return(list(
+      results = list(
+        n_processed = 0,
+        n_inserted = 0,
+        validation_passed = TRUE
+      ),
+      auto_created_people = character()
+    ))
+  }
+
+  cli::cli_alert_info("Found {nrow(workflow_data)} workflow(s) in bundle.")
+
+  # Validate required columns
+  required_cols <- c("workflow_id", "description")
+  missing_cols <- setdiff(required_cols, names(workflow_data))
+
+  if (length(missing_cols) > 0) {
+    cli::cli_abort("Workflow sheet is missing required columns: {.val {missing_cols}}")
+  }
+
+  # Auto-create missing people if created_by is provided
+  auto_created_people <- character()
+  if ("created_by" %in% names(workflow_data)) {
+    auto_created_people <- auto_create_people(workflow_data$created_by, con, validate_only)
+  }
+
+  # Validate against database specs
+  validation_results <- validate_workflows_with_con(workflow_data, con)
+
+  if (!validation_results$valid) {
+    cli::cli_abort(c(
+      "Workflow validation failed:",
+      "x" = validation_results$message
+    ))
+  }
+
+  cli::cli_alert_success("Workflow validation passed.")
+
+  # Insert if not validate_only
+  n_inserted <- 0
+  if (!isTRUE(validate_only)) {
+    n_inserted <- insert_workflows_with_con(workflow_data, con)
+    cli::cli_alert_success("Inserted {nrow(workflow_data)} workflow(s) into database.")
+  } else {
+    cli::cli_alert_info("Validation only mode - no data inserted.")
+  }
+
+  list(
+    results = list(
+      n_processed = nrow(workflow_data),
+      n_inserted = n_inserted,
+      validation_passed = TRUE
+    ),
+    auto_created_people = auto_created_people
+  )
+}
+
+
+#' Auto-create missing people
+#'
+#' Checks if person_ids exist in the people table and creates minimal records
+#' for any that are missing.
+#'
+#' @param person_ids Character vector of person IDs to check/create.
+#' @param con A DBI connection to the database.
+#' @param validate_only Logical. If TRUE, doesn't actually insert.
+#'
+#' @return Character vector of auto-created person IDs.
+#' @keywords internal
+
+auto_create_people <- function(person_ids, con, validate_only = FALSE) {
+
+  # Remove NAs
+  person_ids <- person_ids[!is.na(person_ids) & nzchar(person_ids)]
+
+  if (length(person_ids) == 0) {
+    return(character())
+  }
+
+  # Get existing people
+  existing_people <- DBI::dbReadTable(con, "people")
+
+  # Find missing people
+  if (nrow(existing_people) > 0) {
+    missing_people <- setdiff(person_ids, existing_people$person_id)
+  } else {
+    missing_people <- unique(person_ids)
+  }
+
+  if (length(missing_people) == 0) {
+    return(character())
+  }
+
+  # Create minimal records for missing people
+  if (!isTRUE(validate_only)) {
+    new_people <- data.frame(
+      person_id = missing_people,
+      full_name = NA_character_,
+      email = NA_character_,
+      is_active = 1L,
+      successor_person_id = NA_character_,
+      stringsAsFactors = FALSE
+    )
+
+    DBI::dbWriteTable(con, "people", new_people, append = TRUE, row.names = FALSE)
+  }
+
+  missing_people
+}
+
+
+#' Validate workflows against database specifications (with connection)
+#'
+#' Checks that workflow_ids are unique and created_by references valid people.
+#'
+#' @param workflow_data Data frame of workflows to validate.
+#' @param con A DBI connection to the database.
+#'
+#' @return List with valid (logical) and message (character) elements.
+#' @keywords internal
+#' @importFrom rlang .data
+
+validate_workflows_with_con <- function(workflow_data, con) {
+
+  # Check for duplicate workflow_ids in bundle
+  dup_ids <- workflow_data |>
+    dplyr::group_by(.data$workflow_id) |>
+    dplyr::filter(dplyr::n() > 1) |>
+    dplyr::pull(.data$workflow_id) |>
+    unique()
+
+  if (length(dup_ids) > 0) {
+    return(list(
+      valid = FALSE,
+      message = paste("Duplicate workflow_ids in bundle:", paste(dup_ids, collapse = ", "))
+    ))
+  }
+
+  # Check for duplicates against existing database
+  existing_workflows <- DBI::dbReadTable(con, "workflow")
+
+  if (nrow(existing_workflows) > 0) {
+    existing_ids <- intersect(workflow_data$workflow_id, existing_workflows$workflow_id)
+
+    if (length(existing_ids) > 0) {
+      return(list(
+        valid = FALSE,
+        message = paste("Workflow IDs already exist in database:",
+                      paste(existing_ids, collapse = ", "))
+      ))
+    }
+  }
+
+  # Check created_by references (should all exist now due to auto-create)
+  if ("created_by" %in% names(workflow_data)) {
+    creator_ids <- workflow_data$created_by |>
+      stats::na.omit() |>
+      as.character() |>
+      unique()
+
+    if (length(creator_ids) > 0) {
+      people <- DBI::dbReadTable(con, "people")
+
+      if (nrow(people) > 0) {
+        missing_creators <- setdiff(creator_ids, people$person_id)
+
+        if (length(missing_creators) > 0) {
+          return(list(
+            valid = FALSE,
+            message = paste("Person IDs not found:", paste(missing_creators, collapse = ", "))
+          ))
+        }
+      } else {
+        return(list(
+          valid = FALSE,
+          message = "created_by references people but no people in database"
+        ))
+      }
+    }
+  }
+
+  list(valid = TRUE, message = "All validations passed")
+}
+
+
+#' Insert workflows into the database (with connection)
+#'
+#' Inserts validated workflow data into the workflow table using an existing connection.
+#'
+#' @param workflow_data Data frame of validated workflows.
+#' @param con A DBI connection to the database.
+#'
+#' @return Invisibly returns the number of rows inserted.
+#' @keywords internal
+#' @importFrom rlang .data
+
+insert_workflows_with_con <- function(workflow_data, con) {
+
+  # Prepare data for insertion
+  insert_data <- workflow_data |>
+    dplyr::select(
+      .data$workflow_id,
+      dplyr::any_of(c("description", "created_by", "workflow_date"))
+    )
+
+  # Ensure optional columns exist
+  if (!"created_by" %in% names(insert_data)) {
+    insert_data$created_by <- NA_character_
+  }
+  if (!"workflow_date" %in% names(insert_data)) {
+    insert_data$workflow_date <- NA_character_
+  }
+
+  # Insert into database
+  DBI::dbWriteTable(
+    con,
+    "workflow",
+    insert_data,
+    append = TRUE,
+    row.names = FALSE
+  )
+
+  invisible(nrow(insert_data))
 }
 
 
@@ -555,4 +892,290 @@ backup_db <- function(db_path = NULL,
     md5 = src_md5,
     timestamp = timestamp
   )
+}
+
+
+#' Ingest edges from bundle worksheet (with existing connection)
+#'
+#' Reads the edge sheet from an Excel bundle, validates the data, and
+#' optionally inserts it into the database using an existing connection.
+#'
+#' @param wb An openxlsx workbook object.
+#' @param con A DBI connection to the database.
+#' @param validate_only Logical. If TRUE, only validates without inserting.
+#'
+#' @return List with ingestion results.
+#' @keywords internal
+#' @importFrom rlang .data
+
+ingest_edges_with_con <- function(wb, con, validate_only = FALSE) {
+
+  # Read the edge sheet
+  edge_data <- openxlsx::read.xlsx(wb, sheet = "edge")
+
+  if (is.null(edge_data) || nrow(edge_data) == 0) {
+    cli::cli_alert_warning("Edge sheet is empty. Skipping.")
+    return(list(
+      n_processed = 0,
+      n_inserted = 0,
+      by_type = list(),
+      validation_passed = TRUE
+    ))
+  }
+
+  cli::cli_alert_info("Found {nrow(edge_data)} edge(s) in bundle.")
+
+  # Validate required columns
+  required_cols <- c("parent_id", "child_id", "edge_type")
+  missing_cols <- setdiff(required_cols, names(edge_data))
+
+  if (length(missing_cols) > 0) {
+    cli::cli_abort("Edge sheet is missing required columns: {.val {missing_cols}}")
+  }
+
+  # Validate against database specs
+  validation_results <- validate_edges_with_con(edge_data, con)
+
+  if (!validation_results$valid) {
+    cli::cli_abort(c(
+      "Edge validation failed:",
+      "x" = validation_results$message
+    ))
+  }
+
+  cli::cli_alert_success("Edge validation passed.")
+
+  # Count by edge type
+  type_counts <- edge_data |>
+    dplyr::count(.data$edge_type, name = "n") |>
+    dplyr::arrange(dplyr::desc(.data$n))
+
+  by_type <- as.list(stats::setNames(type_counts$n, type_counts$edge_type))
+
+  # Insert if not validate_only
+  n_inserted <- 0
+  if (!isTRUE(validate_only)) {
+    n_inserted <- insert_edges_with_con(edge_data, con)
+    cli::cli_alert_success("Inserted {nrow(edge_data)} edge(s) into database.")
+  } else {
+    cli::cli_alert_info("Validation only mode - no data inserted.")
+  }
+
+  list(
+    n_processed = nrow(edge_data),
+    n_inserted = n_inserted,
+    by_type = by_type,
+    validation_passed = TRUE
+  )
+}
+
+
+#' Validate edges against database specifications (with connection)
+#'
+#' Checks that parent/child IDs exist, edge types are valid, and type
+#' combinations match edge_spec.
+#'
+#' @param edge_data Data frame of edges to validate.
+#' @param con A DBI connection to the database.
+#'
+#' @return List with valid (logical) and message (character) elements.
+#' @keywords internal
+#' @importFrom rlang .data
+
+validate_edges_with_con <- function(edge_data, con) {
+
+  # Get valid edge types
+  valid_edge_types <- DBI::dbReadTable(con, "edge_spec") |>
+    dplyr::pull(.data$edge_type) |>
+    unique()
+
+  # Check edge_type validity
+  invalid_types <- setdiff(edge_data$edge_type, valid_edge_types)
+
+  if (length(invalid_types) > 0) {
+    return(list(
+      valid = FALSE,
+      message = paste("Invalid edge types:", paste(invalid_types, collapse = ", "))
+    ))
+  }
+
+  # Get all objects (existing + being inserted in this transaction)
+  all_objects <- DBI::dbReadTable(con, "object")
+
+  if (nrow(all_objects) == 0) {
+    return(list(
+      valid = FALSE,
+      message = "No objects found in database. Cannot create edges without objects."
+    ))
+  }
+
+  # Check parent_id validity
+  missing_parents <- setdiff(edge_data$parent_id, all_objects$object_id)
+
+  if (length(missing_parents) > 0) {
+    return(list(
+      valid = FALSE,
+      message = paste("Parent IDs not found:", paste(missing_parents, collapse = ", "))
+    ))
+  }
+
+  # Check child_id validity
+  missing_children <- setdiff(edge_data$child_id, all_objects$object_id)
+
+  if (length(missing_children) > 0) {
+    return(list(
+      valid = FALSE,
+      message = paste("Child IDs not found:", paste(missing_children, collapse = ", "))
+    ))
+  }
+
+  # Get edge_spec with object type constraints
+  edge_spec <- DBI::dbReadTable(con, "edge_spec")
+
+  # For each edge, verify (parent_type, child_type, edge_type) is in edge_spec
+  edges_with_types <- edge_data |>
+    dplyr::left_join(
+      all_objects |> dplyr::select(.data$object_id, parent_type = .data$object_type),
+      by = c("parent_id" = "object_id")
+    ) |>
+    dplyr::left_join(
+      all_objects |> dplyr::select(.data$object_id, child_type = .data$object_type),
+      by = c("child_id" = "object_id")
+    )
+
+  # Check for invalid combinations
+  invalid_combos <- edges_with_types |>
+    dplyr::anti_join(
+      edge_spec |> dplyr::select(.data$parent_type, .data$child_type, .data$edge_type),
+      by = c("parent_type", "child_type", "edge_type")
+    )
+
+  if (nrow(invalid_combos) > 0) {
+    first_invalid <- invalid_combos |> dplyr::slice(1)
+    return(list(
+      valid = FALSE,
+      message = sprintf(
+        "Invalid edge combination: '%s' (%s) -[%s]-> '%s' (%s) not allowed by edge_spec",
+        first_invalid$parent_id,
+        first_invalid$parent_type,
+        first_invalid$edge_type,
+        first_invalid$child_id,
+        first_invalid$child_type
+      )
+    ))
+  }
+
+  # Check for duplicate edges in bundle
+  dup_edges <- edge_data |>
+    dplyr::group_by(.data$parent_id, .data$child_id, .data$edge_type) |>
+    dplyr::filter(dplyr::n() > 1) |>
+    dplyr::ungroup() |>
+    dplyr::distinct(.data$parent_id, .data$child_id, .data$edge_type)
+
+  if (nrow(dup_edges) > 0) {
+    first_dup <- dup_edges |> dplyr::slice(1)
+    return(list(
+      valid = FALSE,
+      message = sprintf(
+        "Duplicate edges in bundle: %s -[%s]-> %s",
+        first_dup$parent_id,
+        first_dup$edge_type,
+        first_dup$child_id
+      )
+    ))
+  }
+
+  # Check for duplicates against existing database
+  existing_edges <- DBI::dbReadTable(con, "edge")
+
+  if (nrow(existing_edges) > 0) {
+    duplicate_edges <- edge_data |>
+      dplyr::inner_join(
+        existing_edges |> dplyr::select(.data$parent_id, .data$child_id, .data$edge_type),
+        by = c("parent_id", "child_id", "edge_type")
+      )
+
+    if (nrow(duplicate_edges) > 0) {
+      first_dup <- duplicate_edges |> dplyr::slice(1)
+      return(list(
+        valid = FALSE,
+        message = sprintf(
+          "Edge already exists in database: %s -[%s]-> %s",
+          first_dup$parent_id,
+          first_dup$edge_type,
+          first_dup$child_id
+        )
+      ))
+    }
+  }
+
+  # Check workflow_id if provided
+  if ("workflow_id" %in% names(edge_data)) {
+    workflow_ids <- edge_data$workflow_id |>
+      stats::na.omit() |>
+      as.character() |>
+      unique()
+
+    if (length(workflow_ids) > 0) {
+      workflows <- DBI::dbReadTable(con, "workflow")
+
+      if (nrow(workflows) > 0) {
+        missing_workflows <- setdiff(workflow_ids, workflows$workflow_id)
+
+        if (length(missing_workflows) > 0) {
+          return(list(
+            valid = FALSE,
+            message = paste("Workflow IDs not found:", paste(missing_workflows, collapse = ", "))
+          ))
+        }
+      } else if (length(workflow_ids) > 0) {
+        return(list(
+          valid = FALSE,
+          message = "Workflow IDs referenced but no workflows in database"
+        ))
+      }
+    }
+  }
+
+  list(valid = TRUE, message = "All validations passed")
+}
+
+
+#' Insert edges into the database (with connection)
+#'
+#' Inserts validated edge data into the edge table using an existing connection.
+#'
+#' @param edge_data Data frame of validated edges.
+#' @param con A DBI connection to the database.
+#'
+#' @return Invisibly returns the number of rows inserted.
+#' @keywords internal
+#' @importFrom rlang .data
+
+insert_edges_with_con <- function(edge_data, con) {
+
+  # Prepare data for insertion
+  insert_data <- edge_data |>
+    dplyr::select(
+      .data$parent_id,
+      .data$child_id,
+      .data$edge_type,
+      dplyr::any_of("workflow_id")
+    )
+
+  # Ensure workflow_id column exists (can be NA)
+  if (!"workflow_id" %in% names(insert_data)) {
+    insert_data$workflow_id <- NA_character_
+  }
+
+  # Insert into database
+  DBI::dbWriteTable(
+    con,
+    "edge",
+    insert_data,
+    append = TRUE,
+    row.names = FALSE
+  )
+
+  invisible(nrow(insert_data))
 }
