@@ -16,32 +16,64 @@ gopheR is an R package framework for managing omics datasets and their relations
 
 gopheR is designed as a **two-package ecosystem**:
 
-### 1. **gopheR (this package)** - The Framework
-The reusable toolkit that any project can use:
+### 1. **gopheR (this package)** - The Framework Package
+An installable R package providing the core infrastructure:
 - ✅ Enforces schema structure (table names, columns, relationships)
 - ✅ Provides core functions (`read_bundle()`, `write_bundle()`, validation)
 - ✅ Works with any database following gopheR conventions
-- ✅ Testable, maintainable, updateable
+- ✅ **Users install and update** via `pak::pak("jeffkimbrel/gopheR")`
+- ✅ **Bug fixes propagate** when users update the package
+- ✅ Testable, maintainable, version-controlled
 
 **What's rigid:** Table and column names (gopheR expects `object_type`, `edge_spec`, etc.)  
 **What's flexible:** The VALUES in those tables (define your own types and relationships)
 
-### 2. **gopherDen** - Your Project Implementation
-A template repository you fork/customize for your specific project:
-- 🗄️ Project-specific SQLite database with custom object types and edges
-- 📊 Quarto report templates for your domain questions
-- 🖥️ Shiny dashboards for interactive data exploration
-- 🤖 LLM-powered natural language queries (via querychat/elmer)
-- 📝 Domain-specific analysis functions
+**Where bugs live:** The complex validation, ingestion, and transaction logic lives here. When we fix bugs, users get them via package updates.
 
-**Think of it as:** gopheR is the engine, gopherDen is the car built around it.
+### 2. **gopherDen** - The Template Repository
+A GitHub template providing domain-specific implementation (MAG/omics example):
+- 🗄️ Example SQLite database populated with omics types (genome, readset, assembly)
+- 📊 Example Quarto dashboards for MAG quality, taxonomy, sample maps
+- 🤖 Example queries using agents/LLM (querychat/elmer patterns)
+- 📝 Example domain-specific helper functions
+- 📖 Documentation showing: "This is for omics - customize for YOUR domain"
+
+**How it works:**
+1. User clicks "Use this template" on GitHub
+2. They get a **static copy** - it's theirs now, not connected to the original
+3. They customize database, reports, functions for their domain (clinical, industrial, etc.)
+4. They maintain their copy independently
+
+**Where "bugs" live:** Domain customizations are so specific that "bugs" are really just "different scientific questions." Users own and maintain their customizations.
+
+**Think of it as:** gopheR is the engine (installable, updatable), gopherDen is the blueprint for building cars (copy once, customize, own it).
 
 ### Why This Design?
 
-✅ **Reusability** - gopheR improvements benefit all projects  
-✅ **Customization** - Each Den adapts to its specific science domain  
+✅ **Bug fixes propagate** - gopheR updates reach all users automatically  
+✅ **Customization freedom** - Each Den is fully customized without affecting others  
+✅ **No forced updates** - Users' custom reports/databases never get overwritten  
+✅ **Reusability** - Core infrastructure (gopheR) improves for everyone  
+✅ **Flexibility** - Each domain adapts gopherDen template to their science  
 ✅ **Accessibility** - Non-coders use Excel + HTML reports, coders use R directly  
-✅ **Scalability** - Start simple, add Shiny/LLM features as needed
+
+### Breaking Changes
+
+When gopheR has breaking changes:
+- **Documentation** explains what changed and why
+- **Migration guides** show how to update code
+- **gopherDen template updated** to demonstrate new patterns
+- **Users adapt their copies** using docs as guide
+
+Example:
+```
+gopheR v0.5.0: BREAKING CHANGE
+- read_bundle() now returns results$objects (plural) instead of results$object
+- Migration: Change result$object to result$objects in your custom code
+- See updated gopherDen template at github.com/jeffkimbrel/gopherDen for examples
+```
+
+This is standard practice for R package ecosystems (tidyverse, shiny, etc.).
 
 ### Starter Database
 
@@ -296,9 +328,43 @@ Tests use the starter database as a fixture:
 
 Schema is populated with omics examples (genome, MAG, assembled_from) but these are NOT requirements - just examples.
 
-## For gopherDen Developers
+## For gopherDen Users
 
-When building a gopherDen template, you're creating a **domain-specific implementation** using gopheR as the engine.
+**gopherDen is a GitHub template repository** - you copy it once and it's yours to customize.
+
+### Getting Started
+
+1. **Use the template:** Click "Use this template" on [github.com/jeffkimbrel/gopherDen](https://github.com/jeffkimbrel/gopherDen)
+2. **You get a static copy** - not connected to the original, fully yours
+3. **Customize for your domain** - change database types, reports, functions
+4. **Maintain independently** - you own it, adapt it as needed
+
+### What's Included (Example: Omics/MAG Domain)
+
+The template provides a **working example** for omics/MAG research:
+- Populated database with omics types (genome:MAG, readset, assembly, etc.)
+- Example Quarto dashboards (MAG quality, taxonomy, sample maps)
+- Example queries and helper functions
+- Documentation showing patterns
+
+**This is an EXAMPLE** - customize it for YOUR domain (clinical, industrial, environmental, etc.).
+
+### Understanding the Relationship
+
+```
+gopheR (installable package)
+├── Core validation/ingestion (where bugs live)
+├── You update: pak::pak_update()
+└── Bug fixes propagate automatically
+
+gopherDen (template repository) 
+├── Example implementation (omics/MAG)
+├── You copy: "Use this template" on GitHub
+├── You customize: database, reports, functions
+└── You maintain: it's yours now
+```
+
+### When building YOUR gopherDen template, you're creating a **domain-specific implementation** using gopheR as the engine.
 
 ### 1. Database Setup
 
@@ -404,16 +470,30 @@ DBI::dbDisconnect(con)
 **✅ DO:**
 - Trust gopheR for all validation and ingestion
 - Use gopheR functions (`read_bundle`, `write_bundle`, `gopher_con`)
+- Add gopheR to your DESCRIPTION file as a dependency: `Imports: gopheR`
+- Keep gopheR updated: `pak::pak_update()` for bug fixes
 - Define domain types in your database
 - Write domain-specific queries and reports
 - Document your custom types and workflows
+- When gopheR has breaking changes, read migration docs and adapt your code
 
 **❌ DON'T:**
-- Modify gopheR package code
-- Hardcode object types in your code (query from database)
+- Modify gopheR package code (you won't get updates)
+- Hardcode object types in your code (query from database instead)
 - Bypass gopheR's validation
 - Store data outside the gopheR database schema
-- Mix domain logic into gopheR
+- Mix domain logic into gopheR (it belongs in your Den)
+- Expect your template to auto-update (it's a static copy you maintain)
+
+**Handling gopheR Updates:**
+
+When gopheR releases breaking changes:
+1. Read the release notes and migration guide
+2. Check the updated gopherDen template for new patterns
+3. Update your custom code accordingly
+4. Test with `validate_only = TRUE` before ingesting real data
+
+This is standard R package practice - breaking changes happen, documentation helps you adapt.
 
 ### 6. Example Domain Customization
 
@@ -448,7 +528,10 @@ wb <- openxlsx::loadWorkbook(bundle_path)
 gopheR::read_bundle("test_data.xlsx", validate_only = TRUE)
 ```
 
-**Remember:** gopheR is the framework, gopherDen is the application. ALL domain knowledge (types, reports, analyses) lives in your Den, not in gopheR.
+**Remember:** 
+- gopheR = installable package (gets bug fixes)
+- gopherDen = GitHub template (static copy you own)
+- ALL domain knowledge (types, reports, analyses) lives in your Den, not in gopheR
 
 ## Quick Reference
 
