@@ -181,7 +181,7 @@ preflight_validate_bundle <- function(wb, default_user = NULL) {
 #' read_bundle("my_data.xlsx", validate_only = TRUE)
 #'
 #' # Insert validated data with default user
-#' results <- read_bundle("my_data.xlsx", default_user = "jkimbrel")
+#' results <- read_bundle("my_data.xlsx", default_user = "jdoe")
 #' results$results$objects  # Check what was inserted
 #' }
 #'
@@ -345,6 +345,27 @@ read_bundle <- function(bundle_path,
     }
   )
 
+  # Archive bundle to den if applicable
+  bundle_archive_path <- NULL
+  if (!isTRUE(validate_only)) {
+    den_root <- find_den_root(dirname(db_path))
+    if (!is.null(den_root)) {
+      archive_dir <- file.path(den_root, "archive", "bundles")
+      dir.create(archive_dir, recursive = TRUE, showWarnings = FALSE)
+      ts        <- format(Sys.time(), "%Y%m%dT%H%M%S")
+      stem      <- sub("\\.[^.]+$", "", basename(bundle_path))
+      ext       <- regmatches(bundle_path, regexpr("\\.[^.]+$", bundle_path))
+      archive_name <- paste0(stem, ".ingested.", ts, ext)
+      bundle_archive_path <- file.path(archive_dir, archive_name)
+      ok <- file.copy(bundle_path, bundle_archive_path)
+      if (ok) {
+        cli::cli_alert_success("Bundle archived: {.path {bundle_archive_path}}")
+      } else {
+        cli::cli_alert_warning("Could not archive bundle to {.path {archive_dir}}")
+      }
+    }
+  }
+
   # Print summary report
   print_ingestion_summary(ingestion_result, validate_only = validate_only)
 
@@ -358,10 +379,11 @@ read_bundle <- function(bundle_path,
   }
 
   invisible(list(
-    bundle_path = normalizePath(bundle_path, mustWork = TRUE),
-    db_path = normalizePath(db_path, mustWork = TRUE),
-    backup = backup_info,
-    results = ingestion_result
+    bundle_path    = normalizePath(bundle_path, mustWork = TRUE),
+    db_path        = normalizePath(db_path, mustWork = TRUE),
+    backup         = backup_info,
+    bundle_archive = bundle_archive_path,
+    results        = ingestion_result
   ))
 }
 
@@ -1200,7 +1222,12 @@ backup_db <- function(db_path = NULL,
   }
 
   if (is.null(backup_dir)) {
-    backup_dir <- file.path(dirname(db_path), "backups")
+    den_root <- find_den_root(dirname(db_path))
+    if (!is.null(den_root)) {
+      backup_dir <- file.path(den_root, "archive", "dens")
+    } else {
+      backup_dir <- file.path(dirname(db_path), "backups")
+    }
   }
 
   dir.create(backup_dir, recursive = TRUE, showWarnings = FALSE)

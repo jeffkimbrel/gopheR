@@ -2,23 +2,30 @@
 % Please edit documentation in R/db.R
 \name{gopher_db_path}
 \alias{gopher_db_path}
-\title{Get path to a gopheR SQLite database file}
+\title{Get path to a gopheR database file}
 \usage{
-gopher_db_path(
-  path = NULL,
-  db = getOption("gopheR.db_file", "gopheR_db.sqlite")
-)
+gopher_db_path(path = NULL, db = NULL)
 }
 \arguments{
 \item{path}{Character scalar. Directory containing the database file.
-If \code{NULL}, uses \code{getOption("gopheR.db_path")} or \code{Sys.getenv("GOPHER_DB_PATH")}.}
+Bypasses all fallback logic when provided.}
 
-\item{db}{Character scalar. Database filename.}
+\item{db}{Character scalar. Database filename. Only used when \code{path} is also
+provided.}
 }
 \value{
 A length-1 character vector: full path to the database file.
 }
 \description{
-Reliable set of code to determine where exactly a gopheR database is in a
-project.
+Resolves the active database using a three-step fallback chain:
+}
+\details{
+\enumerate{
+\item \strong{Explicit argument} --\code{path} (directory) + \code{db} (filename) passed directly
+\item \strong{Options override} --\code{options(gopheR.db_path, gopheR.db_file)}, useful for
+temporarily pointing at a test database (\code{use_db()} sets these)
+\item \strong{Den auto-detection} --walks up from the working directory looking for
+\code{den.yaml}; if found, reads the \verb{database:} field and resolves the path
+relative to the den root
+}
 }

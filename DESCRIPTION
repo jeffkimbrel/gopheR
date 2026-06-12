@@ -1,13 +1,12 @@
 Package: gopheR
 Title: Genomic Objects & Provenance for Environmental Research
-Version: 0.3.1
+Version: 0.4.0
 Authors@R: 
     person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
 Description: Tracking and provenance of sites, samples and omics objects.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
 Imports:
     cli,
     DBI,
@@ -22,3 +21,4 @@ Imports:
 Suggests: 
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0

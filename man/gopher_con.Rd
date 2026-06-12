@@ -7,9 +7,10 @@
 gopher_con(db_path = NULL, read_only = FALSE)
 }
 \arguments{
-\item{db_path}{path to gopher DB}
+\item{db_path}{Full path to the database file. If \code{NULL}, resolved via
+\code{\link[=gopher_db_path]{gopher_db_path()}}.}
 
-\item{read_only}{Logical. If \code{TRUE}, attempts to open the SQLite DB in read-only mode.}
+\item{read_only}{Logical. If \code{TRUE}, opens in read-only mode.}
 }
 \value{
 A DBI connection.

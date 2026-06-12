@@ -14,7 +14,7 @@ gopher_query(con, sql, params = NULL)
 \item{params}{A list of parameters to bind.}
 }
 \value{
-A data.frame (or tibble, depending on DBI backend).
+A data.frame.
 }
 \description{
 Run a parameterized query and return a data frame

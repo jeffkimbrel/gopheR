@@ -71,7 +71,7 @@ options(gopheR.db_path = "/path/to/database/folder")
 read_bundle("my_data.xlsx", validate_only = TRUE)
 
 # Insert validated data with default user
-results <- read_bundle("my_data.xlsx", default_user = "jkimbrel")
+results <- read_bundle("my_data.xlsx", default_user = "jdoe")
 results$results$objects  # Check what was inserted
 }
 
