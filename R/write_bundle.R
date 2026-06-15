@@ -142,7 +142,7 @@ write_bundle <- function(out_xlsx,
   # edge logic
   edge_cols <- get_table_columns(
     "edge",
-    exclude_cols = c("created_at")
+    exclude_cols = c("created_at", "edge_id")
   )
 
   allowed_edge_types <- get_edge_types()
@@ -175,9 +175,9 @@ write_bundle <- function(out_xlsx,
 
 
 
-  # result logic
-  result_cols <- get_table_columns(
-    "result",
+  # object_result logic
+  object_result_cols <- get_table_columns(
+    "object_result",
     exclude_cols = c("result_id", "created_at")
   )
 
@@ -185,24 +185,57 @@ write_bundle <- function(out_xlsx,
 
   add_bundle_sheet(
     wb = wb,
-    sheet = "result",
-    cols = result_cols,
+    sheet = "object_result",
+    cols = object_result_cols,
     header_style = header_style
   )
 
   add_spec_dropdown(
     wb = wb,
-    target_sheet = "result",
-    target_cols = result_cols,
+    target_sheet = "object_result",
+    target_cols = object_result_cols,
     target_col_name = "key",
     spec_values = allowed_result_types,
-    spec_name = "key"
+    spec_name = "object_result_key",
+    enforce = FALSE
   )
 
   add_sheet_dropdown(
     wb = wb,
-    target_sheet = "result",
-    target_cols = result_cols,
+    target_sheet = "object_result",
+    target_cols = object_result_cols,
+    target_col_name = "workflow_id",
+    source_sheet = "workflow",
+    source_col_name = "workflow_id",
+    source_cols = workflow_cols
+  )
+
+  # edge_result logic
+  edge_result_cols <- c("parent_id", "child_id", "edge_type", "workflow_id", "key", "value", "unit")
+
+  allowed_edge_result_types <- get_edge_result_types()
+
+  add_bundle_sheet(
+    wb = wb,
+    sheet = "edge_result",
+    cols = edge_result_cols,
+    header_style = header_style
+  )
+
+  add_spec_dropdown(
+    wb = wb,
+    target_sheet = "edge_result",
+    target_cols = edge_result_cols,
+    target_col_name = "key",
+    spec_values = allowed_edge_result_types,
+    spec_name = "edge_result_key",
+    enforce = FALSE
+  )
+
+  add_sheet_dropdown(
+    wb = wb,
+    target_sheet = "edge_result",
+    target_cols = edge_result_cols,
     target_col_name = "workflow_id",
     source_sheet = "workflow",
     source_col_name = "workflow_id",
@@ -230,13 +263,49 @@ write_bundle <- function(out_xlsx,
     target_cols = object_file_cols,
     target_col_name = "file_role",
     spec_values = allowed_object_file_types,
-    spec_name = "file_role"
+    spec_name = "file_role",
+    enforce = FALSE
   )
 
   add_sheet_dropdown(
     wb = wb,
     target_sheet = "object_file",
     target_cols = object_file_cols,
+    target_col_name = "workflow_id",
+    source_sheet = "workflow",
+    source_col_name = "workflow_id",
+    source_cols = workflow_cols
+  )
+
+  # workflow_file logic
+  workflow_file_cols <- get_table_columns(
+    "workflow_file",
+    exclude_cols = c("workflow_file_id")
+  )
+
+  allowed_workflow_file_roles <- get_workflow_file_types()
+
+  add_bundle_sheet(
+    wb = wb,
+    sheet = "workflow_file",
+    cols = workflow_file_cols,
+    header_style = header_style
+  )
+
+  add_spec_dropdown(
+    wb = wb,
+    target_sheet = "workflow_file",
+    target_cols = workflow_file_cols,
+    target_col_name = "file_role",
+    spec_values = allowed_workflow_file_roles,
+    spec_name = "workflow_file_role",
+    enforce = FALSE
+  )
+
+  add_sheet_dropdown(
+    wb = wb,
+    target_sheet = "workflow_file",
+    target_cols = workflow_file_cols,
     target_col_name = "workflow_id",
     source_sheet = "workflow",
     source_col_name = "workflow_id",
@@ -416,8 +485,50 @@ get_edge_types <- function(db_path = NULL,
 get_result_types <- function(db_path = NULL,
                              read_only = TRUE) {
   get_spec_values(
-    table = "key_spec",
+    table = "object_result_spec",
     column = "key",
+    db_path = db_path,
+    read_only = read_only
+  )
+}
+
+
+#' Get allowed edge result keys from the database
+#'
+#' Returns unique keys defined in `edge_result_spec`.
+#'
+#' @param db_path Optional path to the database.
+#' @param read_only Logical; open connection in read-only mode.
+#'
+#' @return Character vector of result keys.
+#' @keywords internal
+
+get_edge_result_types <- function(db_path = NULL,
+                                  read_only = TRUE) {
+  get_spec_values(
+    table = "edge_result_spec",
+    column = "key",
+    db_path = db_path,
+    read_only = read_only
+  )
+}
+
+
+#' Get allowed workflow file roles from the database
+#'
+#' Returns unique file roles defined in `workflow_file_type_spec`.
+#'
+#' @param db_path Optional path to the database.
+#' @param read_only Logical; open connection in read-only mode.
+#'
+#' @return Character vector of file roles.
+#' @keywords internal
+
+get_workflow_file_types <- function(db_path = NULL,
+                                    read_only = TRUE) {
+  get_spec_values(
+    table = "workflow_file_type_spec",
+    column = "file_role",
     db_path = db_path,
     read_only = read_only
   )

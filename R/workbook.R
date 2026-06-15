@@ -142,7 +142,8 @@ add_dropdown_from_spec <- function(wb,
                                    target_col,
                                    spec_col,
                                    n_values,
-                                   rows = 2:5000) {
+                                   rows = 2:5000,
+                                   enforce = TRUE) {
   if (n_values < 1) {
     return(invisible(wb))
   }
@@ -156,7 +157,8 @@ add_dropdown_from_spec <- function(wb,
     cols = target_col,
     rows = rows,
     type = "list",
-    value = sprintf("'spec'!$%s$2:$%s$%d", col_letter, col_letter, last_row)
+    value = sprintf("'spec'!$%s$2:$%s$%d", col_letter, col_letter, last_row),
+    showErrorMsg = enforce
   )
 
   invisible(wb)
@@ -212,7 +214,8 @@ add_spec_dropdown <- function(wb,
                               target_col_name,
                               spec_values,
                               spec_name,
-                              rows = 2:5000) {
+                              rows = 2:5000,
+                              enforce = TRUE) {
 
   spec_col <- get_next_spec_col(wb)
 
@@ -237,7 +240,8 @@ add_spec_dropdown <- function(wb,
     target_col = target_col,
     spec_col = spec_col,
     n_values = length(spec_values),
-    rows = rows
+    rows = rows,
+    enforce = enforce
   )
 
   invisible(wb)

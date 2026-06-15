@@ -282,11 +282,18 @@ read_bundle <- function(bundle_path,
             results$edges <- NULL
           }
 
-          # Process result sheet (after objects and workflows exist)
-          if ("result" %in% sheet_names) {
+          # Process object_result sheet (after objects and workflows exist)
+          if ("object_result" %in% sheet_names) {
             results$results_data <- ingest_results_with_con(wb, con, validate_only = validate_only)
           } else {
             results$results_data <- NULL
+          }
+
+          # Process edge_result sheet (after edges exist)
+          if ("edge_result" %in% sheet_names) {
+            results$edge_results <- ingest_edge_results_with_con(wb, con, validate_only = validate_only)
+          } else {
+            results$edge_results <- NULL
           }
 
           # Process object_file sheet (after objects and workflows exist)
@@ -294,6 +301,13 @@ read_bundle <- function(bundle_path,
             results$object_files <- ingest_object_files_with_con(wb, con, validate_only = validate_only)
           } else {
             results$object_files <- NULL
+          }
+
+          # Process workflow_file sheet (after workflows exist)
+          if ("workflow_file" %in% sheet_names) {
+            results$workflow_files <- ingest_workflow_files_with_con(wb, con, validate_only = validate_only)
+          } else {
+            results$workflow_files <- NULL
           }
 
           # Commit transaction if not validate_only
@@ -1583,8 +1597,8 @@ insert_edges_with_con <- function(edge_data, con) {
 #' @keywords internal
 ingest_results_with_con <- function(wb, con, validate_only = FALSE) {
 
-  # Read the result sheet
-  result_data <- openxlsx::read.xlsx(wb, sheet = "result")
+  # Read the object_result sheet
+  result_data <- openxlsx::read.xlsx(wb, sheet = "object_result")
 
   if (is.null(result_data) || nrow(result_data) == 0) {
     cli::cli_alert_warning("Result sheet is empty. Skipping.")
@@ -1614,7 +1628,7 @@ ingest_results_with_con <- function(wb, con, validate_only = FALSE) {
   cli::cli_alert_info("Found {nrow(result_data)} result(s) in bundle.")
 
   # Validate
-  validation_result <- validate_results_with_con(result_data, con)
+  validation_result <- validate_results_with_con(result_data, con, validate_only = validate_only)
   if (!validation_result$valid) {
     cli::cli_abort(validation_result$message)
   }
@@ -1645,7 +1659,7 @@ ingest_results_with_con <- function(wb, con, validate_only = FALSE) {
 #'
 #' @return List with valid (logical) and message (character) elements
 #' @keywords internal
-validate_results_with_con <- function(result_data, con) {
+validate_results_with_con <- function(result_data, con, validate_only = FALSE) {
 
   errors <- character()
 
@@ -1655,8 +1669,8 @@ validate_results_with_con <- function(result_data, con) {
   # Get all workflows (from DB + any in current transaction)
   all_workflows <- DBI::dbReadTable(con, "workflow")
 
-  # Get valid keys from key_spec
-  key_spec <- DBI::dbReadTable(con, "key_spec")
+  # Get valid keys from object_result_spec
+  key_spec <- DBI::dbReadTable(con, "object_result_spec")
 
   # Check 1: object_id must exist
   missing_objects <- setdiff(result_data$object_id, all_objects$object_id)
@@ -1677,18 +1691,37 @@ validate_results_with_con <- function(result_data, con) {
   }
 
   # Check 3: Keys must be valid per key_spec
-  invalid_keys <- result_data |>
-    dplyr::anti_join(key_spec, by = "key") |>
-    dplyr::pull(.data$key) |>
-    unique()
+  results_with_type <- result_data |>
+    dplyr::left_join(
+      all_objects |> dplyr::select("object_id", "object_type"),
+      by = "object_id"
+    )
 
-  if (length(invalid_keys) > 0) {
-    valid_keys <- unique(key_spec$key)
-    errors <- c(errors, sprintf(
-      "Invalid result keys: %s\nValid keys: %s",
-      paste(invalid_keys, collapse = ", "),
-      paste(valid_keys, collapse = ", ")
-    ))
+  invalid_keys <- results_with_type |>
+    dplyr::anti_join(key_spec, by = "key") |>
+    dplyr::distinct(.data$key, .data$object_type)
+
+  if (nrow(invalid_keys) > 0) {
+    for (i in seq_len(nrow(invalid_keys))) {
+      key      <- invalid_keys$key[i]
+      obj_type <- invalid_keys$object_type[i]
+
+      if (!isTRUE(validate_only) && interactive()) {
+        added <- prompt_add_result_key_spec(con, key, obj_type)
+        if (!added) {
+          errors <- c(errors, sprintf(
+            "result key '%s' not in spec and not added.", key
+          ))
+        }
+      } else {
+        valid_keys <- unique(key_spec$key)
+        errors <- c(errors, sprintf(
+          "Invalid result key '%s'\nValid keys: %s",
+          key,
+          if (length(valid_keys) > 0) paste(valid_keys, collapse = ", ") else "(none defined)"
+        ))
+      }
+    }
   }
 
   if (length(errors) > 0) {
@@ -1711,7 +1744,7 @@ validate_results_with_con <- function(result_data, con) {
 insert_results_with_con <- function(result_data, con) {
 
   # Select columns for insertion (exclude result_id, it's auto-generated)
-  db_cols <- DBI::dbListFields(con, "result")
+  db_cols <- DBI::dbListFields(con, "object_result")
   db_cols <- db_cols[db_cols != "result_id"]
 
   insert_cols <- intersect(names(result_data), db_cols)
@@ -1720,7 +1753,7 @@ insert_results_with_con <- function(result_data, con) {
   # Insert into database
   DBI::dbWriteTable(
     con,
-    "result",
+    "object_result",
     insert_data,
     append = TRUE,
     row.names = FALSE
@@ -1775,7 +1808,7 @@ ingest_object_files_with_con <- function(wb, con, validate_only = FALSE) {
   cli::cli_alert_info("Found {nrow(file_data)} object_file(s) in bundle.")
 
   # Validate
-  validation_result <- validate_object_files_with_con(file_data, con)
+  validation_result <- validate_object_files_with_con(file_data, con, validate_only = validate_only)
   if (!validation_result$valid) {
     cli::cli_abort(validation_result$message)
   }
@@ -1806,7 +1839,7 @@ ingest_object_files_with_con <- function(wb, con, validate_only = FALSE) {
 #'
 #' @return List with valid (logical) and message (character) elements
 #' @keywords internal
-validate_object_files_with_con <- function(file_data, con) {
+validate_object_files_with_con <- function(file_data, con, validate_only = FALSE) {
 
   errors <- character()
 
@@ -1860,7 +1893,6 @@ validate_object_files_with_con <- function(file_data, con) {
     )
 
   if (nrow(invalid_roles) > 0) {
-    # Group by object_type to show what's valid for each type
     invalid_summary <- invalid_roles |>
       dplyr::distinct(.data$object_type, .data$file_role)
 
@@ -1868,17 +1900,24 @@ validate_object_files_with_con <- function(file_data, con) {
       obj_type <- invalid_summary$object_type[i]
       bad_role <- invalid_summary$file_role[i]
 
-      valid_for_type <- file_role_spec |>
-        dplyr::filter(.data$object_type == obj_type) |>
-        dplyr::pull(.data$file_role)
-
-      errors <- c(errors, sprintf(
-        "Invalid file_role '%s' for object_type '%s'\nValid roles for %s: %s",
-        bad_role,
-        obj_type,
-        obj_type,
-        paste(valid_for_type, collapse = ", ")
-      ))
+      if (!isTRUE(validate_only) && interactive()) {
+        added <- prompt_add_file_role_spec(con, bad_role, obj_type)
+        if (!added) {
+          errors <- c(errors, sprintf(
+            "file_role '%s' for object_type '%s' not in spec and not added.",
+            bad_role, obj_type
+          ))
+        }
+      } else {
+        valid_for_type <- file_role_spec |>
+          dplyr::filter(.data$object_type == obj_type) |>
+          dplyr::pull(.data$file_role)
+        errors <- c(errors, sprintf(
+          "Invalid file_role '%s' for object_type '%s'\nValid roles for %s: %s",
+          bad_role, obj_type, obj_type,
+          if (length(valid_for_type) > 0) paste(valid_for_type, collapse = ", ") else "(none defined)"
+        ))
+      }
     }
   }
 
@@ -1938,4 +1977,259 @@ insert_object_files_with_con <- function(file_data, con) {
   )
 
   nrow(insert_data)
+}
+
+
+#' Ingest edge results from bundle worksheet (with existing connection)
+#'
+#' Reads the edge_result sheet, resolves edge_id from (parent_id, child_id,
+#' edge_type), validates keys against edge_result_spec, and inserts.
+#'
+#' @param wb openxlsx workbook object
+#' @param con A DBI connection to the database
+#' @param validate_only Logical; if TRUE, validation only (no insertion)
+#'
+#' @return List with n_processed and n_inserted counts
+#' @keywords internal
+ingest_edge_results_with_con <- function(wb, con, validate_only = FALSE) {
+
+  data <- openxlsx::read.xlsx(wb, sheet = "edge_result") |>
+    dplyr::filter(
+      !is.na(.data$parent_id) & nzchar(.data$parent_id),
+      !is.na(.data$key)       & nzchar(.data$key)
+    )
+
+  if (nrow(data) == 0) {
+    cli::cli_alert_warning("Edge_result sheet is empty. Skipping.")
+    return(list(n_processed = 0, n_inserted = 0, validation_passed = TRUE))
+  }
+
+  cli::cli_alert_info("Found {nrow(data)} edge_result(s) in bundle.")
+
+  # Resolve edge_id from (parent_id, child_id, edge_type)
+  edges <- DBI::dbReadTable(con, "edge")
+  data <- data |>
+    dplyr::left_join(
+      edges |> dplyr::select(.data$edge_id, .data$parent_id, .data$child_id, .data$edge_type),
+      by = c("parent_id", "child_id", "edge_type")
+    )
+
+  missing_edges <- data |> dplyr::filter(is.na(.data$edge_id))
+  if (nrow(missing_edges) > 0) {
+    first <- missing_edges |> dplyr::slice(1)
+    cli::cli_abort(
+      "Edge not found for edge_result: {first$parent_id} -[{first$edge_type}]-> {first$child_id}"
+    )
+  }
+
+  # Validate keys against edge_result_spec
+  spec <- DBI::dbReadTable(con, "edge_result_spec")
+  if (nrow(spec) > 0) {
+    invalid_keys <- data |>
+      dplyr::anti_join(spec, by = c("edge_type", "key")) |>
+      dplyr::distinct(.data$edge_type, .data$key)
+
+    if (nrow(invalid_keys) > 0) {
+      first <- invalid_keys |> dplyr::slice(1)
+      cli::cli_abort(
+        "Invalid edge_result key '{first$key}' for edge_type '{first$edge_type}'"
+      )
+    }
+  }
+
+  # Validate workflow_id references
+  if ("workflow_id" %in% names(data)) {
+    wf_ids <- data$workflow_id[!is.na(data$workflow_id) & nzchar(data$workflow_id)]
+    if (length(wf_ids) > 0) {
+      all_wf <- DBI::dbReadTable(con, "workflow")
+      missing_wf <- setdiff(wf_ids, all_wf$workflow_id)
+      if (length(missing_wf) > 0) {
+        cli::cli_abort("Edge_result workflow_ids not found: {.val {missing_wf}}")
+      }
+    }
+  }
+
+  cli::cli_alert_success("Edge_result validation passed.")
+
+  n_inserted <- 0
+  if (!isTRUE(validate_only)) {
+    insert_data <- data |>
+      dplyr::select(
+        .data$edge_id, .data$workflow_id, .data$key, .data$value,
+        dplyr::any_of("unit")
+      )
+    DBI::dbWriteTable(con, "edge_result", insert_data, append = TRUE, row.names = FALSE)
+    n_inserted <- nrow(insert_data)
+    cli::cli_alert_success("Inserted {n_inserted} edge_result(s) into database.")
+  }
+
+  list(n_processed = nrow(data), n_inserted = n_inserted, validation_passed = TRUE)
+}
+
+
+#' Ingest workflow files from bundle worksheet (with existing connection)
+#'
+#' Reads the workflow_file sheet, validates file_role against
+#' workflow_file_type_spec, and inserts.
+#'
+#' @param wb openxlsx workbook object
+#' @param con A DBI connection to the database
+#' @param validate_only Logical; if TRUE, validation only (no insertion)
+#'
+#' @return List with n_processed and n_inserted counts
+#' @keywords internal
+ingest_workflow_files_with_con <- function(wb, con, validate_only = FALSE) {
+
+  data <- openxlsx::read.xlsx(wb, sheet = "workflow_file") |>
+    dplyr::filter(
+      !is.na(.data$workflow_id) & nzchar(.data$workflow_id),
+      !is.na(.data$file_path)   & nzchar(.data$file_path)
+    )
+
+  if (nrow(data) == 0) {
+    cli::cli_alert_warning("Workflow_file sheet is empty. Skipping.")
+    return(list(n_processed = 0, n_inserted = 0, validation_passed = TRUE))
+  }
+
+  cli::cli_alert_info("Found {nrow(data)} workflow_file(s) in bundle.")
+
+  errors <- character()
+
+  # Validate workflow_id references
+  all_wf <- DBI::dbReadTable(con, "workflow")
+  missing_wf <- setdiff(data$workflow_id, all_wf$workflow_id)
+  if (length(missing_wf) > 0) {
+    errors <- c(errors, sprintf("Workflow_ids not found: %s", paste(missing_wf, collapse = ", ")))
+  }
+
+  # Validate file_role against spec (if spec has entries)
+  spec <- DBI::dbReadTable(con, "workflow_file_type_spec")
+  if (nrow(spec) > 0 && "file_role" %in% names(data)) {
+    invalid_roles <- setdiff(
+      data$file_role[!is.na(data$file_role) & nzchar(data$file_role)],
+      spec$file_role
+    )
+    if (length(invalid_roles) > 0) {
+      errors <- c(errors, sprintf("Invalid workflow file_role(s): %s", paste(invalid_roles, collapse = ", ")))
+    }
+  }
+
+  # Validate file_path uniqueness
+  existing <- DBI::dbReadTable(con, "workflow_file")
+  if (nrow(existing) > 0) {
+    dup_paths <- intersect(data$file_path, existing$file_path)
+    if (length(dup_paths) > 0) {
+      errors <- c(errors, sprintf("Duplicate file_path(s) already in database: %s", paste(dup_paths, collapse = ", ")))
+    }
+  }
+
+  if (length(errors) > 0) {
+    cli::cli_abort(paste(errors, collapse = "\n"))
+  }
+
+  cli::cli_alert_success("Workflow_file validation passed.")
+
+  n_inserted <- 0
+  if (!isTRUE(validate_only)) {
+    db_cols <- DBI::dbListFields(con, "workflow_file")
+    db_cols <- db_cols[db_cols != "workflow_file_id"]
+    insert_cols <- intersect(names(data), db_cols)
+    insert_data <- data[, insert_cols, drop = FALSE]
+    DBI::dbWriteTable(con, "workflow_file", insert_data, append = TRUE, row.names = FALSE)
+    n_inserted <- nrow(insert_data)
+    cli::cli_alert_success("Inserted {n_inserted} workflow_file(s) into database.")
+  }
+
+  list(n_processed = nrow(data), n_inserted = n_inserted, validation_passed = TRUE)
+}
+
+
+# ── Interactive spec helpers ───────────────────────────────────────────────────
+
+#' Interactively add a new file_role to object_file_type_spec
+#'
+#' Prompts the user to confirm and select which object types the new role
+#' applies to, then inserts the rows. Returns TRUE if added, FALSE if skipped.
+#' @keywords internal
+prompt_add_file_role_spec <- function(con, file_role, found_object_type) {
+  cli::cli_alert_warning(
+    "file_role {.val {file_role}} is not in the spec for object_type {.val {found_object_type}}."
+  )
+
+  response <- readline(prompt = "Add to spec? [y/n]: ")
+  if (!tolower(trimws(response)) %in% c("y", "yes")) {
+    return(FALSE)
+  }
+
+  all_types <- DBI::dbReadTable(con, "object_type") |> dplyr::pull("object_type")
+
+  selected <- utils::select.list(
+    choices   = all_types,
+    preselect = found_object_type,
+    multiple  = TRUE,
+    title     = sprintf("Which object types should '%s' apply to?", file_role)
+  )
+
+  if (length(selected) == 0) {
+    cli::cli_alert_warning("No object types selected, skipping {.val {file_role}}.")
+    return(FALSE)
+  }
+
+  desc <- trimws(readline(prompt = "Description (optional, press Enter to skip): "))
+
+  new_rows <- data.frame(
+    object_type = selected,
+    file_role   = file_role,
+    description = if (nzchar(desc)) desc else NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  DBI::dbWriteTable(con, "object_file_type_spec", new_rows, append = TRUE, row.names = FALSE)
+  cli::cli_alert_success("Added {.val {file_role}} to spec for: {.val {selected}}")
+  TRUE
+}
+
+
+#' Interactively add a new result key to object_result_spec
+#'
+#' Prompts the user to confirm and select which object types the new key
+#' applies to, then inserts the rows. Returns TRUE if added, FALSE if skipped.
+#' @keywords internal
+prompt_add_result_key_spec <- function(con, key, found_object_type) {
+  cli::cli_alert_warning(
+    "result key {.val {key}} is not in the spec."
+  )
+
+  response <- readline(prompt = "Add to spec? [y/n]: ")
+  if (!tolower(trimws(response)) %in% c("y", "yes")) {
+    return(FALSE)
+  }
+
+  all_types <- DBI::dbReadTable(con, "object_type") |> dplyr::pull("object_type")
+
+  selected <- utils::select.list(
+    choices   = all_types,
+    preselect = found_object_type,
+    multiple  = TRUE,
+    title     = sprintf("Which object types should '%s' apply to?", key)
+  )
+
+  if (length(selected) == 0) {
+    cli::cli_alert_warning("No object types selected, skipping {.val {key}}.")
+    return(FALSE)
+  }
+
+  desc <- trimws(readline(prompt = "Description (optional, press Enter to skip): "))
+
+  new_rows <- data.frame(
+    object_type = selected,
+    key         = key,
+    value_type  = NA_character_,
+    description = if (nzchar(desc)) desc else NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  DBI::dbWriteTable(con, "object_result_spec", new_rows, append = TRUE, row.names = FALSE)
+  cli::cli_alert_success("Added result key {.val {key}} to spec for: {.val {selected}}")
+  TRUE
 }

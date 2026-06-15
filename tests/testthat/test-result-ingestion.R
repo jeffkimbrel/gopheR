@@ -29,7 +29,7 @@ test_that("read_bundle ingests results successfully", {
 
   # Create bundle with results
   wb <- openxlsx::createWorkbook()
-  openxlsx::addWorksheet(wb, "result")
+  openxlsx::addWorksheet(wb, "object_result")
 
   test_results <- data.frame(
     object_id = c("genome001", "genome001"),
@@ -40,7 +40,7 @@ test_that("read_bundle ingests results successfully", {
     stringsAsFactors = FALSE
   )
 
-  openxlsx::writeData(wb, "result", test_results, startRow = 1, colNames = TRUE)
+  openxlsx::writeData(wb, "object_result", test_results, startRow = 1, colNames = TRUE)
   openxlsx::saveWorkbook(wb, bundle_path, overwrite = TRUE)
 
   # Ingest bundle
@@ -48,7 +48,7 @@ test_that("read_bundle ingests results successfully", {
 
   # Verify results were inserted
   con <- DBI::dbConnect(RSQLite::SQLite(), db_info$full_path)
-  inserted_results <- DBI::dbReadTable(con, "result")
+  inserted_results <- DBI::dbReadTable(con, "object_result")
   DBI::dbDisconnect(con)
 
   expect_equal(nrow(inserted_results), 2)
@@ -92,24 +92,24 @@ test_that("result ingestion detects invalid keys", {
 
   # Create bundle with invalid key
   wb <- openxlsx::createWorkbook()
-  openxlsx::addWorksheet(wb, "result")
+  openxlsx::addWorksheet(wb, "object_result")
 
   test_results <- data.frame(
     object_id = c("genome001"),
     workflow_id = c("wf001"),
-    key = c("invalid_key"),  # Not in key_spec
+    key = c("invalid_key"),  # Not in object_result_spec
     value = c("100"),
     unit = c(NA),
     stringsAsFactors = FALSE
   )
 
-  openxlsx::writeData(wb, "result", test_results, startRow = 1, colNames = TRUE)
+  openxlsx::writeData(wb, "object_result", test_results, startRow = 1, colNames = TRUE)
   openxlsx::saveWorkbook(wb, bundle_path, overwrite = TRUE)
 
   # Should fail
   expect_error(
     read_bundle(bundle_path, validate_only = FALSE, backup = FALSE, default_user = "test_user"),
-    "Invalid result keys"
+    "Invalid result key"
   )
 
   # Cleanup
@@ -149,7 +149,7 @@ test_that("result ingestion allows multiple entries for same object + key", {
 
   # Create bundle with same key from different workflows (append-only history)
   wb <- openxlsx::createWorkbook()
-  openxlsx::addWorksheet(wb, "result")
+  openxlsx::addWorksheet(wb, "object_result")
 
   test_results <- data.frame(
     object_id = c("genome001", "genome001"),
@@ -160,7 +160,7 @@ test_that("result ingestion allows multiple entries for same object + key", {
     stringsAsFactors = FALSE
   )
 
-  openxlsx::writeData(wb, "result", test_results, startRow = 1, colNames = TRUE)
+  openxlsx::writeData(wb, "object_result", test_results, startRow = 1, colNames = TRUE)
   openxlsx::saveWorkbook(wb, bundle_path, overwrite = TRUE)
 
   # Should succeed (append-only, multiple values allowed)
@@ -168,7 +168,7 @@ test_that("result ingestion allows multiple entries for same object + key", {
 
   # Verify both results were inserted
   con <- DBI::dbConnect(RSQLite::SQLite(), db_info$full_path)
-  inserted_results <- DBI::dbReadTable(con, "result")
+  inserted_results <- DBI::dbReadTable(con, "object_result")
   DBI::dbDisconnect(con)
 
   expect_equal(nrow(inserted_results), 2)
