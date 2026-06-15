@@ -71,7 +71,7 @@ initialize_den <- function(path, name, create_examples = FALSE) {
   }
 
   # --- Starter database as {name}.den ---
-  starter <- system.file("extdata", "starter_db.sqlite", package = "gopheR")
+  starter <- system.file("extdata", "starter_db.den", package = "gopheR")
   if (!nzchar(starter) || !file.exists(starter)) {
     cli::cli_abort(c(
       "Could not find starter database in {.pkg gopheR}.",

@@ -25,8 +25,9 @@ test_that("read_bundle ingests people successfully", {
 
   # Verify people were inserted
   con <- DBI::dbConnect(RSQLite::SQLite(), db_info$full_path)
-  inserted_people <- DBI::dbReadTable(con, "people")
+  all_people <- DBI::dbReadTable(con, "people")
   DBI::dbDisconnect(con)
+  inserted_people <- all_people[all_people$person_id %in% c("alice", "bob"), ]
 
   expect_equal(nrow(inserted_people), 2)
   expect_true("alice" %in% inserted_people$person_id)

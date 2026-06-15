@@ -18,8 +18,10 @@ test_that("write_bundle creates sheets in logical order with people_sheet", {
   expect_equal(visible_sheets[2], "workflow")
   expect_equal(visible_sheets[3], "object")
   expect_equal(visible_sheets[4], "edge")
-  expect_equal(visible_sheets[5], "result")
-  expect_equal(visible_sheets[6], "object_file")
+  expect_equal(visible_sheets[5], "object_result")
+  expect_equal(visible_sheets[6], "edge_result")
+  expect_equal(visible_sheets[7], "object_file")
+  expect_equal(visible_sheets[8], "workflow_file")
 
   # Cleanup
   unlink(bundle_path)
@@ -46,8 +48,10 @@ test_that("write_bundle creates sheets in logical order without people_sheet", {
   expect_equal(visible_sheets[1], "workflow")
   expect_equal(visible_sheets[2], "object")
   expect_equal(visible_sheets[3], "edge")
-  expect_equal(visible_sheets[4], "result")
-  expect_equal(visible_sheets[5], "object_file")
+  expect_equal(visible_sheets[4], "object_result")
+  expect_equal(visible_sheets[5], "edge_result")
+  expect_equal(visible_sheets[6], "object_file")
+  expect_equal(visible_sheets[7], "workflow_file")
   expect_false("people" %in% visible_sheets)
 
   # Cleanup

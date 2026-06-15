@@ -4,7 +4,7 @@
 \alias{validate_results_with_con}
 \title{Validate results against database (with connection)}
 \usage{
-validate_results_with_con(result_data, con)
+validate_results_with_con(result_data, con, validate_only = FALSE)
 }
 \arguments{
 \item{result_data}{Data frame of results to validate}

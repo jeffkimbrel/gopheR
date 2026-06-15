@@ -46,6 +46,31 @@ write_bundle <- function(out_xlsx,
   # spec - logic for hiding spec sheet is at the bottom
   openxlsx::addWorksheet(wb, "spec")
 
+  # Query existing objects once; used for advisory dropdowns across multiple sheets.
+  # Silently skipped if no database is available (e.g. first-time setup).
+  existing_object_ids <- character(0)
+  existing_study_ids  <- character(0)
+  tryCatch({
+    con <- gopher_con()
+    all_objs <- DBI::dbGetQuery(con, "SELECT object_id, object_type FROM object ORDER BY object_id")
+    DBI::dbDisconnect(con)
+    existing_object_ids <- all_objs$object_id
+    existing_study_ids  <- all_objs$object_id[all_objs$object_type == "study"]
+  }, error = function(e) NULL)
+
+  # Write to spec sheet once so all target columns share the same range (avoids
+  # duplicating a potentially large list for each column that references it).
+  object_id_spec_col <- NULL
+  study_id_spec_col  <- NULL
+  if (length(existing_object_ids) > 0) {
+    object_id_spec_col <- get_next_spec_col(wb)
+    add_spec_column(wb, values = existing_object_ids, col = object_id_spec_col, name = "existing_object_id")
+  }
+  if (length(existing_study_ids) > 0) {
+    study_id_spec_col <- get_next_spec_col(wb)
+    add_spec_column(wb, values = existing_study_ids, col = study_id_spec_col, name = "existing_study_id")
+  }
+
 
   # people logic (optional, should be first sheet if requested)
   if (isTRUE(people_sheet)) {
@@ -138,6 +163,16 @@ write_bundle <- function(out_xlsx,
     spec_name = "object_type"
   )
 
+  if (!is.null(study_id_spec_col) && "study_id" %in% object_cols) {
+    add_dropdown_from_spec(
+      wb, sheet = "object",
+      target_col = match("study_id", object_cols),
+      spec_col = study_id_spec_col,
+      n_values = length(existing_study_ids),
+      enforce = FALSE
+    )
+  }
+
 
   # edge logic
   edge_cols <- get_table_columns(
@@ -173,6 +208,16 @@ write_bundle <- function(out_xlsx,
     source_cols = workflow_cols
   )
 
+  if (!is.null(object_id_spec_col)) {
+    if ("parent_id" %in% edge_cols) {
+      add_dropdown_from_spec(wb, sheet = "edge", target_col = match("parent_id", edge_cols),
+        spec_col = object_id_spec_col, n_values = length(existing_object_ids), enforce = FALSE)
+    }
+    if ("child_id" %in% edge_cols) {
+      add_dropdown_from_spec(wb, sheet = "edge", target_col = match("child_id", edge_cols),
+        spec_col = object_id_spec_col, n_values = length(existing_object_ids), enforce = FALSE)
+    }
+  }
 
 
   # object_result logic
@@ -210,6 +255,11 @@ write_bundle <- function(out_xlsx,
     source_cols = workflow_cols
   )
 
+  if (!is.null(object_id_spec_col) && "object_id" %in% object_result_cols) {
+    add_dropdown_from_spec(wb, sheet = "object_result", target_col = match("object_id", object_result_cols),
+      spec_col = object_id_spec_col, n_values = length(existing_object_ids), enforce = FALSE)
+  }
+
   # edge_result logic
   edge_result_cols <- c("parent_id", "child_id", "edge_type", "workflow_id", "key", "value", "unit")
 
@@ -241,6 +291,17 @@ write_bundle <- function(out_xlsx,
     source_col_name = "workflow_id",
     source_cols = workflow_cols
   )
+
+  if (!is.null(object_id_spec_col)) {
+    if ("parent_id" %in% edge_result_cols) {
+      add_dropdown_from_spec(wb, sheet = "edge_result", target_col = match("parent_id", edge_result_cols),
+        spec_col = object_id_spec_col, n_values = length(existing_object_ids), enforce = FALSE)
+    }
+    if ("child_id" %in% edge_result_cols) {
+      add_dropdown_from_spec(wb, sheet = "edge_result", target_col = match("child_id", edge_result_cols),
+        spec_col = object_id_spec_col, n_values = length(existing_object_ids), enforce = FALSE)
+    }
+  }
 
   # file logic
   object_file_cols <- get_table_columns(
@@ -276,6 +337,11 @@ write_bundle <- function(out_xlsx,
     source_col_name = "workflow_id",
     source_cols = workflow_cols
   )
+
+  if (!is.null(object_id_spec_col) && "object_id" %in% object_file_cols) {
+    add_dropdown_from_spec(wb, sheet = "object_file", target_col = match("object_id", object_file_cols),
+      spec_col = object_id_spec_col, n_values = length(existing_object_ids), enforce = FALSE)
+  }
 
   # workflow_file logic
   workflow_file_cols <- get_table_columns(

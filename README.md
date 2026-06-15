@@ -107,3 +107,7 @@ See [DETAILS.md](DETAILS.md) for:
 - Working with dens
 - Key functions reference
 - Planned / future ideas
+
+See [EXAMPLES.md](EXAMPLES.md) for:
+- MetaWRAP coassembly → binning → quality filtering (how many workflows, where quality lives, what to do with intermediate bins)
+- Mapping many readsets to a MAG collection (375-edge model, edge results, MAGsets)

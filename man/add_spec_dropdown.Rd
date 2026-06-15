@@ -11,7 +11,8 @@ add_spec_dropdown(
   target_col_name,
   spec_values,
   spec_name,
-  rows = 2:5000
+  rows = 2:5000,
+  enforce = TRUE
 )
 }
 \arguments{

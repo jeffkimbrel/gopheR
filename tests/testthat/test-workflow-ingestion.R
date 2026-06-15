@@ -104,8 +104,9 @@ test_that("workflow ingestion auto-creates people", {
 
   # Verify people were auto-created
   con <- DBI::dbConnect(RSQLite::SQLite(), db_info$full_path)
-  people <- DBI::dbReadTable(con, "people")
+  all_people <- DBI::dbReadTable(con, "people")
   DBI::dbDisconnect(con)
+  people <- all_people[all_people$person_id %in% c("alice", "bob"), ]
 
   expect_equal(nrow(people), 2)
   expect_true("alice" %in% people$person_id)

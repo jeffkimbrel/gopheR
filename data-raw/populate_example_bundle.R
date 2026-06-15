@@ -12,7 +12,7 @@ library(devtools)
 load_all()
 
 # Create a temporary database from gopheR starter
-temp_db <- tempfile(fileext = ".sqlite")
+temp_db <- tempfile(fileext = ".den")
 make_new_db(temp_db, overwrite = TRUE)
 
 # Point to the temporary database
@@ -326,7 +326,7 @@ mag_results <- bind_rows(
 )
 
 all_results <- bind_rows(assembly_results, mag_results)
-writeData(wb, sheet = "result", x = all_results, startRow = 2, colNames = FALSE)
+writeData(wb, sheet = "object_result", x = all_results, startRow = 2, colNames = FALSE)
 
 # ==============================================================================
 # OBJECT_FILE SHEET

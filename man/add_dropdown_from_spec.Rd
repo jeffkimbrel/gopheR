@@ -10,7 +10,8 @@ add_dropdown_from_spec(
   target_col,
   spec_col,
   n_values,
-  rows = 2:5000
+  rows = 2:5000,
+  enforce = TRUE
 )
 }
 \arguments{

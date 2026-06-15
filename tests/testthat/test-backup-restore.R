@@ -1,9 +1,9 @@
 test_that("backup_db creates backup with correct MD5", {
   # Setup - create test database
   test_dir <- tempdir()
-  db_path <- file.path(test_dir, "test_backup.sqlite")
+  db_path <- file.path(test_dir, "test_backup.den")
   file.copy(
-    from = system.file("extdata", "starter_db.sqlite", package = "gopheR"),
+    from = system.file("extdata", "starter_db.den", package = "gopheR"),
     to = db_path,
     overwrite = TRUE
   )
@@ -28,10 +28,10 @@ test_that("backup_db creates backup with correct MD5", {
 test_that("restore from backup works", {
   # Setup
   test_dir <- tempdir()
-  db_path <- file.path(test_dir, "test_restore.sqlite")
+  db_path <- file.path(test_dir, "test_restore.den")
 
   file.copy(
-    from = system.file("extdata", "starter_db.sqlite", package = "gopheR"),
+    from = system.file("extdata", "starter_db.den", package = "gopheR"),
     to = db_path,
     overwrite = TRUE
   )

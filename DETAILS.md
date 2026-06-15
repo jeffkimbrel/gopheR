@@ -294,8 +294,19 @@ Tests use the starter database as a fixture; run with `devtools::test()`.
 
 ## Planned / Future Ideas
 
+Items marked **(GopherScout)** are primarily implemented there but affect gopheR's schema or design.
+
+### gopheR
+
 - **`split_den(study_id)`** — split a multi-study den into per-study dens
-- **Full provenance graph via igraph/ggraph** — large-scale graph output from gopheR using tools that can handle thousands of nodes; GopherScout's built-in graph is capped at ~200 nodes for performance
+- **Full provenance graph via igraph/ggraph** — large-scale graph output using tools that can handle thousands of nodes; GopherScout's built-in graph is intentionally capped at ~200 nodes
 - **Unit enforcement** — enforce that a given result key always uses the unit from `object_result_spec` (currently advisory; bundle-provided unit can override)
-- **AI-assisted bundle generation** — agent that infers object IDs, edges, and file roles from a folder of files and a naming convention description, and drafts a gopheR Excel bundle for review
+- **AI-assisted bundle generation** — agent that reads a folder of bioinformatics tool outputs (coverage TSVs, CheckM tables, assembly stats) and a plain-English description of what was run, then drafts a gopheR bundle for review; handles the mechanical work of ID mapping, edge inference, and bulk row generation that makes large imports tedious to do by hand
 - **Post-ingestion SQL dump** — after ingestion, write a diffable SQL text dump to `archive/dens/` so git tracks readable history instead of binary snapshots
+
+### Ecosystem / cross-cutting
+
+- **Write mode in GopherScout** — add/edit objects, results, and workflows from the GUI without needing R; gopheR's validation logic would need to be accessible as a shared library or duplicated in Rust
+- **`views` table in schema** — rows defining named visualizations (scatter plot, bar, summary card) with axes and filters; GopherScout reads and renders them dynamically; would require a schema addition to gopheR
+- **Remote database access** — "Open from URL" in GopherScout fetches a read-only database from a public URL; enables sharing a project without giving write access; no gopheR changes needed
+- **LLM chat interface in GopherScout** — natural language queries over the database; LLM receives schema (object types, edge types, result keys from spec tables) as context; SQL shown and editable before execution; model-agnostic
