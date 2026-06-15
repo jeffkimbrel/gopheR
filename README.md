@@ -118,3 +118,5 @@ See [DETAILS.md](DETAILS.md) for:
 - [ ] `den.yaml` spec — read by GopherScout to resolve the database path and set the title bar name
 - [ ] Post-ingestion SQL dump — timestamped text dump to `archive/dens/` after each ingestion; diffable in git, used by `restore_den()` to rebuild from history
 - [ ] AI-assisted bundle generation — agent infers object IDs, edges, and file roles from a folder of files and a naming convention; handles MD5s, file sizes, and metadata TSV parsing; user reviews before import
+- [ ] Unit enforcement in `object_result_spec` — add a `unit` column to the spec so that result keys can declare an expected unit (e.g. depth → m, temperature → °C); ingestion warns or errors when the bundle row's unit doesn't match; enforced at spec definition time, not per-row
+- [ ] `split_den(study_id)` — extract a study and its objects into a new den; objects that belong cleanly to one study move with it; objects shared across studies (e.g. a site or readset used by two studies) are duplicated into both; intended for when a den has grown to cover multiple independent studies that should be managed separately
