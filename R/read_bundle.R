@@ -2075,6 +2075,23 @@ ingest_edge_results_with_con <- function(wb, con, validate_only = FALSE) {
 
   n_inserted <- 0
   if (!isTRUE(validate_only)) {
+    # Auto-populate unit from edge_result_spec where not provided in bundle
+    spec <- DBI::dbReadTable(con, "edge_result_spec")
+    if ("unit" %in% names(spec) && nrow(spec) > 0) {
+      data <- data |>
+        dplyr::left_join(
+          spec |> dplyr::select("key", spec_unit = "unit"),
+          by = "key"
+        ) |>
+        dplyr::mutate(
+          unit = dplyr::coalesce(
+            dplyr::na_if(as.character(.data$unit), ""),
+            .data$spec_unit
+          )
+        ) |>
+        dplyr::select(-"spec_unit")
+    }
+
     insert_data <- data |>
       dplyr::select(
         .data$edge_id, .data$workflow_id, .data$key, .data$value,
