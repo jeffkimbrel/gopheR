@@ -91,27 +91,40 @@ initialize_den <- function(path, name, create_examples = FALSE, template_den = N
   if (!ok) cli::cli_abort("Failed to create database at {.path {den_file}}")
 
   # --- Template spec copy ---
+  template_agent_context <- NULL
   if (!is.null(template_den)) {
     template_path <- resolve_den_path(template_den)
     copy_den_spec(from = template_path, to = den_file)
+    template_agent_context <- read_yaml_block(
+      file.path(dirname(template_path), "den.yaml"),
+      key = "agent_context"
+    )
     cli::cli_alert_info("Spec tables copied from template: {.path {template_path}}")
   }
 
   # --- den.yaml ---
+  agent_context_lines <- if (!is.null(template_agent_context)) {
+    c("", "agent_context: |", template_agent_context)
+  } else {
+    c(
+      "",
+      "# agent_context is read by the fill-bundle agent (/fill-bundle in Claude Code).",
+      "# Describe your project's naming conventions, pipeline steps, and ID formats",
+      "# so the agent can make accurate first-pass inferences from your files.",
+      "# agent_context: |",
+      "#   Samples from the XYZ site (IDs: XYZ_S01-XYZ_S20).",
+      "#   Pipeline: MEGAHIT assembly → MetaWRAP binning → CheckM2 quality → GTDB-Tk taxonomy.",
+      "#   Genome IDs: m{site}_{bin_zero_padded_3}  e.g. mXYZ_001",
+      "#   Workflow IDs: {tool}_{site}_{YYYY-MM}  e.g. megahit_XYZ_2025-03",
+      "#   Files live at: /data/XYZ/"
+    )
+  }
+
   yaml_lines <- c(
     paste0("name: ", name),
     paste0("database: ", basename(den_file)),
     paste0("created: ", format(Sys.Date(), "%Y-%m-%d")),
-    "",
-    "# agent_context is read by the fill-bundle agent (/fill-bundle in Claude Code).",
-    "# Describe your project's naming conventions, pipeline steps, and ID formats",
-    "# so the agent can make accurate first-pass inferences from your files.",
-    "# agent_context: |",
-    "#   Samples from the XYZ site (IDs: XYZ_S01-XYZ_S20).",
-    "#   Pipeline: MEGAHIT assembly → MetaWRAP binning → CheckM2 quality → GTDB-Tk taxonomy.",
-    "#   Genome IDs: m{site}_{bin_zero_padded_3}  e.g. mXYZ_001",
-    "#   Workflow IDs: {tool}_{site}_{YYYY-MM}  e.g. megahit_XYZ_2025-03",
-    "#   Files live at: /data/XYZ/"
+    agent_context_lines
   )
   writeLines(yaml_lines, file.path(den_path, "den.yaml"))
 
@@ -172,6 +185,23 @@ initialize_den <- function(path, name, create_examples = FALSE, template_den = N
   ))
 
   invisible(den_path)
+}
+
+# Extract a YAML block scalar value (key: |) as a character vector of indented lines.
+# Returns NULL if the key is absent or has no content.
+read_yaml_block <- function(yaml_path, key) {
+  if (!file.exists(yaml_path)) return(NULL)
+  lines     <- readLines(yaml_path, warn = FALSE)
+  key_idx   <- grep(paste0("^", key, ":\\s*\\|"), lines)
+  if (length(key_idx) == 0) return(NULL)
+  start     <- key_idx[1] + 1
+  if (start > length(lines)) return(NULL)
+  block <- character(0)
+  for (i in start:length(lines)) {
+    if (nzchar(lines[i]) && !grepl("^\\s", lines[i])) break
+    block <- c(block, lines[i])
+  }
+  if (length(block) == 0) NULL else block
 }
 
 # Resolve a den directory or .den file path to the actual .den file path.
