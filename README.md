@@ -6,7 +6,7 @@
 
 **Genomic Objects & Provenance for Environmental Research**
 
-gopheR is an R package for tracking bioinformatics objects (samples, assemblies, genomes, etc.), the workflows that produced them, and the results attached to them — all in a SQLite database. It is the foundation of a three-layer ecosystem:
+gopheR is an R package for tracking bioinformatics objects (samples, assemblies, genomes, etc.), the workflows that produced them, and the results attached to them — all in a SQLite database.
 
 | Layer | Tool | Role |
 |---|---|---|
@@ -37,11 +37,10 @@ initialize_den("~/projects", "my_project")
 
 ### 2. Open the den in RStudio/Positron
 
-Open `my_project.Rproj` — gopheR will find the database automatically via `den.yaml`. No path setup needed.
-
-To temporarily use a different database (e.g. a test copy):
+Open `my_project.Rproj` — gopheR will find the database automatically via `den.yaml`.
 
 ```r
+# Temporarily use a different database
 use_db("~/projects/other_project/other.den")
 use_den()  # revert back to the den
 ```
@@ -50,10 +49,9 @@ use_den()  # revert back to the den
 
 ```r
 write_bundle("data_entry.xlsx", people_sheet = TRUE)
-# Fill in the Excel file, then...
 ```
 
-### 4. Validate and ingest
+### 4. Fill in the Excel file, then validate and ingest
 
 ```r
 # Dry run first
@@ -76,26 +74,26 @@ DBI::dbDisconnect(con)
 ## Key Concepts
 
 - **Objects** — your datasets (samples, readsets, assemblies, genomes, etc.)
-- **Edges** — directed relationships between objects (`assembled_from`, `binned_from`, etc.)
-- **Results** — append-only key/value measurements (`completeness`, `taxonomy`, `pH`, etc.)
+- **Edges** — directed relationships between objects (`assembled_from`, `binned_from`, etc.); read as "child is edge_type parent" (e.g. "MAG is binned_from assembly")
+- **Results** — append-only key/value measurements (`completeness`, `taxonomy`, `pH`, etc.) with units
 - **Workflows** — the processes that produced objects or results
-- **Den** — a git repo holding your `.den` database; created by `initialize_den()`
+- **Den** — a git repo holding your `.den` database; `den.yaml` travels with it and stores display settings
 
-The schema structure (table names, columns) is fixed. The *values* — object types, edge types, result keys — are defined per-project in spec tables, making gopheR domain-agnostic.
+The schema structure (table names, columns) is fixed. The *values* — object types, edge types, result keys, file roles — are defined per-project in spec tables, making gopheR domain-agnostic. See [DETAILS.md](DETAILS.md) for which spec values are strictly controlled and which can be added interactively.
 
 ---
 
-## The Den Structure
+## Den Structure
 
 ```
 my_project/
 ├── my_project.den         ← SQLite database
-├── den.yaml               ← project config
+├── den.yaml               ← project config (name, settings)
 ├── my_project.Rproj       ← RStudio project
 ├── .gitignore
 └── archive/
     ├── dens/              ← auto-backup before each ingestion
-    └── bundles/           ← archived Excel bundles after each ingestion
+    └── bundles/           ← archived Excel bundles after ingestion
 ```
 
 ---
@@ -103,21 +101,9 @@ my_project/
 ## Further Reading
 
 See [DETAILS.md](DETAILS.md) for:
-- Full validation pipeline (pre-flight + database phases)
-- Schema reference
-- Design principles
+- Architecture and design decisions
+- Schema reference and spec table conventions
+- Full validation pipeline
 - Working with dens
-- Common patterns and gotchas
-- Example workflows
-
----
-
-## Planned / Future Ideas
-
-- [ ] `initialize_den()` `create_examples = TRUE` — populate `examples/` with a fresh starter database and bundle built from `data-raw/` scripts; example data script needs to be made robust to starter DB changes (query spec tables to validate example data rather than hardcoding type/key/role strings)
-- [ ] `den.yaml` spec — read by GopherScout to resolve the database path and set the title bar name
-- [ ] Post-ingestion SQL dump — timestamped text dump to `archive/dens/` after each ingestion; diffable in git, used by `restore_den()` to rebuild from history
-- [ ] AI-assisted bundle generation — agent infers object IDs, edges, and file roles from a folder of files and a naming convention; handles MD5s, file sizes, and metadata TSV parsing; user reviews before import
-- [ ] Unit enforcement in `object_result_spec` — add a `unit` column to the spec so that result keys can declare an expected unit (e.g. depth → m, temperature → °C); ingestion warns or errors when the bundle row's unit doesn't match; enforced at spec definition time, not per-row
-- [ ] `split_den(study_id)` — extract a study and its objects into a new den; objects that belong cleanly to one study move with it; objects shared across studies (e.g. a site or readset used by two studies) are duplicated into both; intended for when a den has grown to cover multiple independent studies that should be managed separately
-- [ ] Full provenance graph export via igraph/ggraph — `plot_den()` or similar renders the complete object/edge graph using R graph libraries that can handle thousands of nodes; export to GraphML or Gephi format for external visualization; this is the "wow factor" overview graph (better suited to igraph than to GopherScout's browser renderer)
+- Key functions reference
+- Planned / future ideas
