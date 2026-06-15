@@ -1,123 +1,246 @@
 ---
 name: fill-bundle
-description: Generate a gopheR Excel bundle from a folder of files and a naming convention description
+description: Staged agent for generating gopheR Excel bundles from bioinformatics output files — proposes, confirms, validates, then hands off to the user for ingestion
 ---
 
 # Fill Bundle
 
-You are helping a user generate a gopheR Excel bundle from a set of files. The bundle will be ingested into a gopheR database using `read_bundle()`.
+You are an agent that builds gopheR Excel bundles from a folder of bioinformatics output files. You work in stages, one bundle at a time, handing each bundle to the user for ingestion before moving to the next stage.
 
-## Your job
+**Your stance:** propose-then-confirm. Scan what is available, make your best inference, show it to the user, and ask for corrections — don't ask for everything upfront.
 
-Given a folder of files and a description of the naming convention, you will:
-1. Read the den's database to understand valid object types, edge types, result keys, and file roles
-2. Infer objects, edges, and file associations from the file names and user description
-3. Produce a populated Excel bundle (or a script that generates one) ready for review and ingestion
+A good opening message:
+> "I can see 5 paired-end FASTQ pairs named `ARW_S01_R1.fastq.gz` … `ARW_S05_R2.fastq.gz`. My guess: `readset` objects `ARW_S01`–`ARW_S05`, subtype `paired_end`. Does that look right, or should I adjust the IDs or type?"
 
-## Step 1: Read the den's spec tables
+You do **not** ingest bundles. You produce an Excel file, run a dry-run validation, and hand off to the user to run `read_bundle()` for real.
 
-Before doing anything else, find `den.yaml` in the current directory (or walk up to find it). Then query the database to understand what is valid in this project:
+---
+
+## Setup: Read the den
+
+Before anything else, locate `den.yaml` in the current directory (or walk up the tree):
 
 ```bash
-# Find the database
 cat den.yaml
-
-# Query valid types (adjust path to match den.yaml database: field)
-sqlite3 <database_path> "SELECT object_type, description FROM object_type;"
-sqlite3 <database_path> "SELECT object_type, object_subtype FROM object_subtype;"
-sqlite3 <database_path> "SELECT edge_type, parent_type, child_type, description FROM edge_spec;"
-sqlite3 <database_path> "SELECT key, object_type, description FROM key_spec;"
-sqlite3 <database_path> "SELECT object_type, file_role, description FROM object_file_type_spec;"
 ```
 
-Report back to the user what types, edges, keys, and file roles are available. Ask for clarification if the project types are unfamiliar.
+Extract two things:
+1. The `database:` field — path to the `.den` SQLite file
+2. The `agent_context:` field (if present) — project-specific naming conventions, pipeline steps, and ID formats. **Use this to prime your inferences before looking at any files.** If it's absent or sparse, proceed with generic heuristics and ask the user to fill it in for future runs.
 
-## Step 2: Understand the file structure
+Then query the database:
 
-Ask the user to describe (or paste) the file listing. If they can run it locally:
+```bash
+sqlite3 <database_path> "SELECT object_type, description FROM object_type;"
+sqlite3 <database_path> "SELECT object_type, object_subtype, description FROM object_subtype;"
+sqlite3 <database_path> "SELECT edge_type, parent_type, child_type, description FROM edge_spec;"
+sqlite3 <database_path> "SELECT object_type, key, value_type, unit, description FROM object_result_spec;"
+sqlite3 <database_path> "SELECT key, value_type, unit, description FROM edge_result_spec;"
+sqlite3 <database_path> "SELECT object_type, file_role, description FROM object_file_type_spec;"
+sqlite3 <database_path> "SELECT file_role, description FROM workflow_file_type_spec;"
+sqlite3 <database_path> "SELECT object_id, object_type, label FROM object ORDER BY object_type, object_id;"
+```
+
+Report what you find. If the object type hierarchy is unfamiliar and there is no `agent_context`, ask the user to orient you before proceeding.
+
+Then ask the user to share a file listing (or scan locally if the path is accessible):
 
 ```bash
 find /path/to/files -type f | sort
 ```
 
-If the files are on a remote server and not accessible locally, work from a representative sample or a manually described structure. **Do not assume you can access remote files directly.**
+---
 
-From the file listing and the user's description of the naming convention, identify:
-- What each file is (object type, file role)
-- What the object IDs should be (usually derived from the filename stem)
-- What the parent-child relationships (edges) are between objects
-- Which workflow produced which files (ask the user if not obvious)
+## Stages
 
-## Step 3: Build the bundle structure
-
-Map files to gopheR bundle sheets. The bundle has these sheets in order:
-
-### people
-Only needed if new contributors are being added. Ask the user if any `created_by` values are new to the database.
-
-### workflow
-One row per workflow. Ask the user for:
-- `workflow_id` — short identifier (e.g. `checkm2_run1`)
-- `description` — what the workflow did, including tool version and key parameters
-- `workflow_date` — date run (YYYY-MM-DD)
-- `created_by` — person ID
-
-### object
-One row per object. Derive from file names where possible. Ask the user to confirm object IDs, types, labels, and descriptions before proceeding.
-
-### edge
-One row per relationship. Use the `edge_spec` table to validate that the parent/child type combination is valid. Natural reading: "child IS edge_type parent" (e.g. "assembly assembled_from readset").
-
-### result
-One row per measurement. Only include if the user has result data to add. Results are append-only — re-running a workflow creates new rows, it does not overwrite old ones.
-
-### object_file
-One row per file. Columns: `object_id`, `file_role`, `file_path`, `workflow_id`, `checksum`.
-
-**Checksums:** If the files are not locally accessible, leave `checksum` blank and note clearly that checksums need to be filled in before ingestion. Blank checksums are allowed by gopheR.
-
-**File paths:** Use the actual server/disk paths, not local paths. Ask the user to confirm the base path.
-
-## Step 4: Produce the bundle
-
-Options — ask the user which they prefer:
-
-**Option A: R script** — generate an R script using `write_bundle()` + `openxlsx` that the user runs locally in their den. This is the most reliable approach.
-
-**Option B: Direct write** — if R is available locally and the den database is accessible, write the bundle directly using `gopheR::write_bundle()` followed by `openxlsx` to populate the sheets.
-
-**Option C: Summary for manual entry** — produce a structured summary (one section per sheet) that the user copies into a bundle they generate themselves with `write_bundle()`.
-
-## Rules and judgment calls
-
-**When object IDs are ambiguous:** Propose a convention and ask for confirmation before proceeding. Document the convention in a comment at the top of the R script.
-
-**When edge relationships are unclear:** Ask. Don't guess. A wrong edge is harder to fix than a missing one.
-
-**When a file role doesn't exist in the spec tables:** Flag it to the user — do not invent file roles. The user may need to add it to `object_file_type_spec` first.
-
-**When result keys don't exist in the spec tables:** Same — flag and ask. Do not add result rows with keys not in `key_spec`.
-
-**When the same object ID appears to come from multiple files:** Ask whether these are the same object (one row, multiple file roles) or different objects (multiple rows).
-
-**When files are on a remote server:** Be explicit that you cannot calculate checksums, verify file existence, or detect file formats from binary headers. The bundle will be a draft — the user should review and fill in checksums before ingesting.
-
-## What this skill does NOT do
-
-- It does not ingest the bundle — that is `read_bundle()` in R
-- It does not validate against the database — that happens during ingestion
-- It does not calculate checksums for remote files
-- It does not modify the database directly
-- It does not make decisions about scientific interpretation (which MAG came from which assembly is a scientific question, not a file naming question)
-
-## Customizing this skill for your project
-
-Edit this file to add project-specific context:
-- The object type hierarchy used in this project
-- Common naming conventions for this project's files
-- Which workflows are typically run and what they produce
-- Any non-obvious edge relationships specific to this domain
+Work through these in order. Complete each stage fully — produce bundle, validate, hand off — before starting the next.
 
 ---
 
-*This skill is generated by `initialize_den()` as a starting point. Customize it for your project's naming conventions and object hierarchy.*
+### Stage 1: People, Workflows, Objects
+
+Everything else references these. Do this first.
+
+**Infer from files:**
+- FASTQ pairs (`*_R1*` / `*_R2*`) → `readset`, subtype `paired_end`; ID from filename stem before `_R1`/`_R2`
+- Single-end, nanopore, PacBio: infer subtype from naming or ask
+- Assembly FASTAs in an output folder → `assembly`; ID from folder or filename stem
+- MAG/bin FASTAs in `bins/` or `MAGs/` → `genome`, subtype `MAG`; ID from filename stem using the project convention
+- Tool output directories (SPAdes, MEGAHIT, MetaWRAP) → note for `workflow_file` in Stage 3; use directory metadata as `workflow_id` hint
+
+**For each workflow, propose or ask:**
+- `workflow_id` — propose from tool name + date if visible in directory metadata (e.g. `megahit_ARW1_2025-03`)
+- `description` — tool name, version, key parameters
+- `workflow_date` — YYYY-MM-DD; ask if not apparent
+- `created_by` — person ID; ask
+
+**Present a draft before writing anything:**
+
+```
+PEOPLE (if new):
+  jdoe  Jane Doe  jdoe@uni.edu
+
+WORKFLOWS:
+  megahit_ARW1_2025-03  MEGAHIT coassembly (v1.2.9, default params)  2025-03-10  jdoe
+
+OBJECTS:
+  ARW_S01  readset  paired_end  "ARW sample 1"
+  ARW_S02  readset  paired_end  "ARW sample 2"
+  mARW1_001  genome  MAG  "ARW1 bin 001"
+  ...
+```
+
+Flag before asking for confirmation:
+- Object IDs that collide with existing database entries
+- Object types or subtypes not in spec
+- `created_by` values not in the database (need to add to `people` sheet)
+- Ambiguous relationships the user needs to decide (e.g. which sample does this readset come from?)
+
+After confirmation: generate bundle, validate, hand off (see "Producing a bundle" below).
+
+---
+
+### Stage 2: Edges
+
+Run after Stage 1 is ingested — parent and child objects must exist in the database.
+
+Query the database first to confirm what objects are now present:
+
+```bash
+sqlite3 <database_path> "SELECT object_id, object_type FROM object ORDER BY object_type, object_id;"
+```
+
+Edge direction: **"child IS edge_type OF parent"**
+- `(child=readset, edge_type=derived_from, parent=sample)` → "readset is derived_from sample"
+- `(child=assembly, edge_type=assembled_from, parent=readset)` → "assembly is assembled_from readset"
+- `(child=genome, edge_type=binned_from, parent=assembly)` → "genome is binned_from assembly"
+
+**Present a draft:**
+
+```
+EDGES:
+  ARW_S01  derived_from  SAMPLE_01   workflow: sequencing_run1
+  ARW_S02  derived_from  SAMPLE_02   workflow: sequencing_run1
+  mARW1_001  binned_from  ARW1_assembly  workflow: metawrap_binning_2025-03
+  ...
+```
+
+Flag:
+- Parent or child IDs not found in the database
+- Edge types not in `edge_spec`
+- Parent/child type combinations that don't match `edge_spec`
+
+After confirmation: generate bundle, validate, hand off.
+
+---
+
+### Stage 3: Results and Files
+
+Run after Stage 1 is ingested (objects and workflows must exist).
+
+**Results — infer from tool output files:**
+
+| Tool output | Key(s) | Notes |
+|---|---|---|
+| CheckM2 `quality_report.tsv` | `completeness`, `contamination` | Match `Name` col to object IDs; show mapping |
+| QUAST `report.tsv` | `total_length`, `N50`, `n_contigs`, `gc_content` | Show column → key mapping |
+| seqkit stats | `total_length`, `n_contigs`, `mean_read_length` | Varies by mode |
+| GTDB-Tk `*.summary.tsv` | `GTDB_taxonomy` | Use `classification` column as-is |
+| Coverage TSV | `mean_coverage`, `breadth` | Per-object only; edge-level coverage goes in Stage 4 |
+
+Always show the column-to-key mapping before writing result rows. Tool column names rarely match gopheR key names exactly.
+
+**Files — infer from file listing:**
+- Match files to object IDs by filename stem
+- Assign `file_role` from `object_file_type_spec`
+- Use actual disk paths, not local paths — ask the user to confirm the base path
+- Leave `checksum` blank if files are not locally accessible; note this clearly
+- Tool output directories → `workflow_file` rows
+
+**Present a draft:**
+
+```
+OBJECT_RESULT:
+  mARW1_001  completeness   87.3  %   (quality_report.tsv "Completeness")
+  mARW1_001  contamination   1.2  %   (quality_report.tsv "Contamination")
+  mARW1_001  GTDB_taxonomy  d__Bacteria;p__Proteobacteria;...
+
+OBJECT_FILE:
+  mARW1_001  genome_fasta  /data/bins/mARW1_001.fasta  megahit_ARW1_2025-03
+  ARW_S01    fastq_r1      /data/reads/ARW_S01_R1.fastq.gz  sequencing_run1
+
+WORKFLOW_FILE (optional):
+  megahit_ARW1_2025-03  assembly_dir  /data/megahit_output/
+```
+
+Flag:
+- Result keys not in `object_result_spec` for the object's type
+- File roles not in `object_file_type_spec` for the object's type
+- Object IDs in results or files not found in the database
+
+After confirmation: generate bundle, validate, hand off.
+
+---
+
+### Stage 4: Edge Results (if needed)
+
+Rare — only if there are per-edge measurements (e.g. read coverage of a genome from a specific readset).
+
+Run after Stage 2 is ingested (edges must exist). Query existing edges first:
+
+```bash
+sqlite3 <database_path> "SELECT edge_id, parent_id, child_id, edge_type FROM edge;"
+```
+
+Present a draft and flag any keys not in `edge_result_spec`. Generate bundle, validate, hand off.
+
+---
+
+## Producing a bundle
+
+For each stage, generate an R script that:
+1. Calls `gopheR::write_bundle("bundle_stage{N}.xlsx")` to create a blank template with spec dropdowns
+2. Uses `openxlsx` to load the workbook and populate only the sheets needed for this stage
+3. Saves the result to `bundle_stage{N}_draft.xlsx`
+
+Then execute the script (if `Rscript` is available in the den) and run a dry-run validation:
+
+```r
+gopheR::read_bundle("bundle_stage1_draft.xlsx", validate_only = TRUE, default_user = "jdoe")
+```
+
+Show the full validation output to the user. If it passes, tell the user:
+
+> "Validation passed. Run this to ingest:
+> `gopheR::read_bundle("bundle_stage1_draft.xlsx", default_user = "jdoe")`
+> Let me know when it's done and I'll move to Stage 2."
+
+If validation fails, diagnose the error, fix the bundle, and re-validate before handing off.
+
+---
+
+## Rules
+
+**Object IDs:** Propose a naming convention and confirm before generating rows. Document it as a comment in the R script.
+
+**Edges:** If a parent object doesn't exist in the database and isn't in this bundle, flag it — don't invent parent IDs. Ask whether to add the parent first or adjust the edge.
+
+**Unknown file roles or result keys:** Do not invent them. Flag to the user — they may need to add the value to the spec first via an interactive `read_bundle()` session in R.
+
+**Remote files:** Checksums cannot be computed for files not accessible locally. Leave `checksum` blank and note it.
+
+**Same ID from multiple files:** Ask — same object with multiple file roles, or distinct objects?
+
+**Parsing tool output:** Always show the column-to-key mapping before writing result rows.
+
+**Scientific judgment:** Do not decide which MAG came from which assembly, which sample a readset belongs to, or whether a detection threshold is met. Those are biology questions. Ask the user.
+
+---
+
+## What this skill does NOT do
+
+- Ingest bundles — that is `gopheR::read_bundle()` run by the user
+- Modify the database directly
+- Compute checksums for remote files
+- Make scientific judgments about object relationships
+

@@ -4,7 +4,7 @@
 \alias{initialize_den}
 \title{Initialize a new gopherDen project}
 \usage{
-initialize_den(path, name, create_examples = FALSE)
+initialize_den(path, name, create_examples = FALSE, template_den = NULL)
 }
 \arguments{
 \item{path}{Character. Parent directory where the den folder will be created.}
@@ -14,6 +14,13 @@ filename (\verb{\{name\}.den}), and RStudio project name.}
 
 \item{create_examples}{Logical. If \code{TRUE} (default), populates an \verb{examples/}
 folder with a starter bundle and pre-built example database.}
+
+\item{template_den}{Character. Optional path to an existing \code{.den} file or
+den folder. If provided, the new den's spec tables (\code{object_type},
+\code{object_subtype}, \code{edge_spec}, \code{object_result_spec}, \code{edge_result_spec},
+\code{object_file_type_spec}, \code{workflow_file_type_spec}) are replaced with
+those from the template. Actual data (objects, edges, workflows, results,
+files, people) is never copied.}
 }
 \value{
 Invisibly returns the path to the new den folder.
@@ -28,5 +35,6 @@ bundle archives, and provenance history.
 \dontrun{
 initialize_den("~/projects", "ARW_metagenomics")
 initialize_den("~/projects", "my_project", create_examples = FALSE)
+initialize_den("~/projects", "new_project", template_den = "~/projects/ARW_metagenomics/")
 }
 }

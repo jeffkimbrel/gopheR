@@ -35,6 +35,13 @@ initialize_den("~/projects", "my_project")
 # Creates ~/projects/my_project/ with database, den.yaml, .Rproj, git init
 ```
 
+If you have an existing den with spec tables already configured (object types, edge types, result keys, file roles), use it as a template so you don't have to set up the spec from scratch:
+
+```r
+initialize_den("~/projects", "new_project", template_den = "~/projects/my_project/")
+# Copies all spec tables from my_project — no data, just the structure
+```
+
 ### 2. Open the den in RStudio/Positron
 
 Open `my_project.Rproj` — gopheR will find the database automatically via `den.yaml`.
@@ -49,6 +56,18 @@ use_den()  # revert back to the den
 
 ```r
 write_bundle("data_entry.xlsx", people_sheet = TRUE)
+```
+
+**Or let an agent fill it for you.** If you have [Claude Code](https://claude.ai/code) installed, open it inside the den directory and type `/fill-bundle`. The agent reads your spec tables and existing objects, scans a folder of tool outputs (FASTQs, CheckM2 tables, GTDB-Tk results, etc.), proposes objects/edges/results in stages, and generates a populated bundle ready for your review and ingestion.
+
+To improve the agent's first-pass inferences, add an `agent_context` block to `den.yaml`:
+
+```yaml
+agent_context: |
+  Samples from the XYZ site (IDs: XYZ_S01–XYZ_S10).
+  Pipeline: MEGAHIT assembly → MetaWRAP binning → CheckM2 quality.
+  Assembly reads are at /data/XYZ/reads/, MAG sequences at /data/XYZ/bins/.
+  Genome IDs follow: mXYZ_{bin_zero_padded_3}  e.g. mXYZ_001
 ```
 
 ### 4. Fill in the Excel file, then validate and ingest
@@ -77,7 +96,7 @@ DBI::dbDisconnect(con)
 - **Edges** — directed relationships between objects (`assembled_from`, `binned_from`, etc.); read as "child is edge_type parent" (e.g. "MAG is binned_from assembly")
 - **Results** — append-only key/value measurements (`completeness`, `taxonomy`, `pH`, etc.) with units
 - **Workflows** — the processes that produced objects or results
-- **Den** — a git repo holding your `.den` database; `den.yaml` travels with it and stores display settings
+- **Den** — a git repo holding your `.den` database; `den.yaml` travels with it and stores display settings and agent context
 
 The schema structure (table names, columns) is fixed. The *values* — object types, edge types, result keys, file roles — are defined per-project in spec tables, making gopheR domain-agnostic. See [DETAILS.md](DETAILS.md) for which spec values are strictly controlled and which can be added interactively.
 

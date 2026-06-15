@@ -36,6 +36,12 @@ find_den_root <- function(path = NULL) {
 #'   filename (`{name}.den`), and RStudio project name.
 #' @param create_examples Logical. If `TRUE` (default), populates an `examples/`
 #'   folder with a starter bundle and pre-built example database.
+#' @param template_den Character. Optional path to an existing `.den` file or
+#'   den folder. If provided, the new den's spec tables (`object_type`,
+#'   `object_subtype`, `edge_spec`, `object_result_spec`, `edge_result_spec`,
+#'   `object_file_type_spec`, `workflow_file_type_spec`) are replaced with
+#'   those from the template. Actual data (objects, edges, workflows, results,
+#'   files, people) is never copied.
 #'
 #' @returns Invisibly returns the path to the new den folder.
 #' @export
@@ -44,9 +50,10 @@ find_den_root <- function(path = NULL) {
 #' \dontrun{
 #' initialize_den("~/projects", "ARW_metagenomics")
 #' initialize_den("~/projects", "my_project", create_examples = FALSE)
+#' initialize_den("~/projects", "new_project", template_den = "~/projects/ARW_metagenomics/")
 #' }
 
-initialize_den <- function(path, name, create_examples = FALSE) {
+initialize_den <- function(path, name, create_examples = FALSE, template_den = NULL) {
 
   path     <- normalizePath(path, mustWork = FALSE)
   den_path <- file.path(path, name)
@@ -83,11 +90,28 @@ initialize_den <- function(path, name, create_examples = FALSE) {
   ok <- file.copy(starter, den_file)
   if (!ok) cli::cli_abort("Failed to create database at {.path {den_file}}")
 
+  # --- Template spec copy ---
+  if (!is.null(template_den)) {
+    template_path <- resolve_den_path(template_den)
+    copy_den_spec(from = template_path, to = den_file)
+    cli::cli_alert_info("Spec tables copied from template: {.path {template_path}}")
+  }
+
   # --- den.yaml ---
   yaml_lines <- c(
     paste0("name: ", name),
     paste0("database: ", basename(den_file)),
-    paste0("created: ", format(Sys.Date(), "%Y-%m-%d"))
+    paste0("created: ", format(Sys.Date(), "%Y-%m-%d")),
+    "",
+    "# agent_context is read by the fill-bundle agent (/fill-bundle in Claude Code).",
+    "# Describe your project's naming conventions, pipeline steps, and ID formats",
+    "# so the agent can make accurate first-pass inferences from your files.",
+    "# agent_context: |",
+    "#   Samples from the XYZ site (IDs: XYZ_S01-XYZ_S20).",
+    "#   Pipeline: MEGAHIT assembly → MetaWRAP binning → CheckM2 quality → GTDB-Tk taxonomy.",
+    "#   Genome IDs: m{site}_{bin_zero_padded_3}  e.g. mXYZ_001",
+    "#   Workflow IDs: {tool}_{site}_{YYYY-MM}  e.g. megahit_XYZ_2025-03",
+    "#   Files live at: /data/XYZ/"
   )
   writeLines(yaml_lines, file.path(den_path, "den.yaml"))
 
@@ -148,4 +172,61 @@ initialize_den <- function(path, name, create_examples = FALSE) {
   ))
 
   invisible(den_path)
+}
+
+# Resolve a den directory or .den file path to the actual .den file path.
+resolve_den_path <- function(path) {
+  path <- normalizePath(path, mustWork = FALSE)
+
+  if (file.exists(path) && !dir.exists(path)) {
+    return(path)
+  }
+
+  if (dir.exists(path)) {
+    yaml_path <- file.path(path, "den.yaml")
+    if (!file.exists(yaml_path)) {
+      cli::cli_abort("No den.yaml found in template directory: {.path {path}}")
+    }
+    lines   <- readLines(yaml_path, warn = FALSE)
+    db_line <- grep("^database:", lines, value = TRUE)
+    if (length(db_line) == 0) {
+      cli::cli_abort("den.yaml in {.path {path}} has no 'database:' field.")
+    }
+    db_file <- trimws(sub("^database:\\s*", "", db_line[1]))
+    full    <- file.path(path, db_file)
+    if (!file.exists(full)) {
+      cli::cli_abort("Template database not found: {.path {full}}")
+    }
+    return(full)
+  }
+
+  cli::cli_abort("Template den not found: {.path {path}}")
+}
+
+# Copy spec tables from one .den file to another, replacing existing rows.
+copy_den_spec <- function(from, to) {
+  spec_tables <- c(
+    "object_type", "object_subtype",
+    "edge_spec",
+    "object_result_spec", "edge_result_spec",
+    "object_file_type_spec", "workflow_file_type_spec"
+  )
+
+  con_from <- DBI::dbConnect(RSQLite::SQLite(), from, extended_types = TRUE)
+  con_to   <- DBI::dbConnect(RSQLite::SQLite(), to,   extended_types = TRUE)
+  on.exit({
+    DBI::dbDisconnect(con_from)
+    DBI::dbDisconnect(con_to)
+  }, add = TRUE)
+
+  from_tables <- DBI::dbListTables(con_from)
+  to_tables   <- DBI::dbListTables(con_to)
+
+  for (tbl in spec_tables) {
+    if (!tbl %in% from_tables) next
+    if (!tbl %in% to_tables)   next
+    data <- DBI::dbReadTable(con_from, tbl)
+    DBI::dbExecute(con_to, paste0("DELETE FROM \"", tbl, "\""))
+    if (nrow(data) > 0) DBI::dbAppendTable(con_to, tbl, data)
+  }
 }

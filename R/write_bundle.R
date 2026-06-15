@@ -39,6 +39,19 @@ write_bundle <- function(out_xlsx,
     stop("Package 'openxlsx' is required.")
   }
 
+  # Resolve directory path to .den file via den.yaml
+  if (!is.null(db_path) && dir.exists(db_path)) {
+    yaml_path <- file.path(db_path, "den.yaml")
+    if (file.exists(yaml_path)) {
+      lines    <- readLines(yaml_path, warn = FALSE)
+      db_line  <- grep("^database:", lines, value = TRUE)
+      if (length(db_line) > 0) {
+        db_file <- trimws(sub("^database:\\s*", "", db_line[1]))
+        db_path <- file.path(db_path, db_file)
+      }
+    }
+  }
+
   # workbook
   wb <- openxlsx::createWorkbook()
   header_style <- bundle_header_style()
@@ -51,7 +64,7 @@ write_bundle <- function(out_xlsx,
   existing_object_ids <- character(0)
   existing_study_ids  <- character(0)
   tryCatch({
-    con <- gopher_con()
+    con <- gopher_con(db_path = db_path)
     all_objs <- DBI::dbGetQuery(con, "SELECT object_id, object_type FROM object ORDER BY object_id")
     DBI::dbDisconnect(con)
     existing_object_ids <- all_objs$object_id
@@ -76,6 +89,7 @@ write_bundle <- function(out_xlsx,
   if (isTRUE(people_sheet)) {
     people_cols <- get_table_columns(
       "people",
+      db_path = db_path,
       exclude_cols = c("created_at", "is_active")
     )
 
@@ -103,6 +117,7 @@ write_bundle <- function(out_xlsx,
   # workflow logic
   workflow_cols <- get_table_columns(
     "workflow",
+    db_path = db_path,
     exclude_cols = c("created_at")
   )
 
@@ -141,10 +156,11 @@ write_bundle <- function(out_xlsx,
   # object logic
   object_cols <- get_table_columns(
     "object",
+    db_path = db_path,
     exclude_cols = c("created_at", "object_subtype")
   )
 
-  allowed_object_types <- get_object_types()
+  allowed_object_types <- get_object_types(db_path = db_path)
 
   add_bundle_sheet(
     wb = wb,
@@ -177,10 +193,11 @@ write_bundle <- function(out_xlsx,
   # edge logic
   edge_cols <- get_table_columns(
     "edge",
+    db_path = db_path,
     exclude_cols = c("created_at", "edge_id")
   )
 
-  allowed_edge_types <- get_edge_types()
+  allowed_edge_types <- get_edge_types(db_path = db_path)
 
   add_bundle_sheet(
     wb = wb,
@@ -223,10 +240,11 @@ write_bundle <- function(out_xlsx,
   # object_result logic
   object_result_cols <- get_table_columns(
     "object_result",
+    db_path = db_path,
     exclude_cols = c("result_id", "created_at")
   )
 
-  allowed_result_types <- get_result_types()
+  allowed_result_types <- get_result_types(db_path = db_path)
 
   add_bundle_sheet(
     wb = wb,
@@ -263,7 +281,7 @@ write_bundle <- function(out_xlsx,
   # edge_result logic
   edge_result_cols <- c("parent_id", "child_id", "edge_type", "workflow_id", "key", "value", "unit")
 
-  allowed_edge_result_types <- get_edge_result_types()
+  allowed_edge_result_types <- get_edge_result_types(db_path = db_path)
 
   add_bundle_sheet(
     wb = wb,
@@ -306,10 +324,11 @@ write_bundle <- function(out_xlsx,
   # file logic
   object_file_cols <- get_table_columns(
     "object_file",
+    db_path = db_path,
     exclude_cols = c("object_file_id", "created_at")
   )
 
-  allowed_object_file_types <- get_object_file_types()
+  allowed_object_file_types <- get_object_file_types(db_path = db_path)
 
   add_bundle_sheet(
     wb = wb,
@@ -346,10 +365,11 @@ write_bundle <- function(out_xlsx,
   # workflow_file logic
   workflow_file_cols <- get_table_columns(
     "workflow_file",
+    db_path = db_path,
     exclude_cols = c("workflow_file_id")
   )
 
-  allowed_workflow_file_roles <- get_workflow_file_types()
+  allowed_workflow_file_roles <- get_workflow_file_types(db_path = db_path)
 
   add_bundle_sheet(
     wb = wb,
