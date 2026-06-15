@@ -5,7 +5,7 @@ library(DBI)
 
 # Set database path
 options(gopheR.db_path = "inst/extdata")
-options(gopheR.db_file = "blank_db.sqlite")
+options(gopheR.db_file = "starter_db.den")
 
 # Get connection using gopheR helper
 con <- gopher_con()
@@ -15,7 +15,7 @@ con <- gopher_con()
 # ==============================================================================
 
 # Check what's already there
-existing_keys <- dbGetQuery(con, "SELECT DISTINCT key FROM key_spec")$key
+existing_keys <- dbGetQuery(con, "SELECT DISTINCT key FROM object_result_spec")$key
 cat("Existing keys:", paste(existing_keys, collapse = ", "), "\n\n")
 
 # Keys we need for our example
@@ -47,23 +47,30 @@ new_keys <- data.frame(
     "Genome size in base pairs",
     "GTDB taxonomy classification string"
   ),
+  unit = c(
+    NA, "°C",
+    NA, "bp",
+    "bp",
+    "bp", NA
+  ),
   stringsAsFactors = FALSE
 )
 
 # Only insert keys that don't exist
 for (i in 1:nrow(new_keys)) {
   key_exists <- dbGetQuery(con,
-    "SELECT COUNT(*) as n FROM key_spec WHERE object_type = ? AND key = ?",
+    "SELECT COUNT(*) as n FROM object_result_spec WHERE object_type = ? AND key = ?",
     params = list(new_keys$object_type[i], new_keys$key[i]))$n > 0
 
   if (!key_exists) {
     dbExecute(con,
-      "INSERT INTO key_spec (object_type, key, value_type, description) VALUES (?, ?, ?, ?)",
+      "INSERT INTO object_result_spec (object_type, key, value_type, description, unit) VALUES (?, ?, ?, ?, ?)",
       params = list(
         new_keys$object_type[i],
         new_keys$key[i],
         new_keys$value_type[i],
-        new_keys$description[i]
+        new_keys$description[i],
+        new_keys$unit[i]
       ))
     cat("✓ Added key:", new_keys$key[i], "for", new_keys$object_type[i], "\n")
   }

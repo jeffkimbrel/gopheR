@@ -1633,6 +1633,28 @@ ingest_results_with_con <- function(wb, con, validate_only = FALSE) {
     cli::cli_abort(validation_result$message)
   }
 
+  # Auto-populate unit from spec where not provided in bundle
+  if (!isTRUE(validate_only)) {
+    spec <- DBI::dbReadTable(con, "object_result_spec")
+    if ("unit" %in% names(spec) && nrow(spec) > 0) {
+      all_obj <- DBI::dbReadTable(con, "object") |>
+        dplyr::select("object_id", "object_type")
+      result_data <- result_data |>
+        dplyr::left_join(all_obj, by = "object_id") |>
+        dplyr::left_join(
+          spec |> dplyr::select("object_type", "key", spec_unit = "unit"),
+          by = c("object_type", "key")
+        ) |>
+        dplyr::mutate(
+          unit = dplyr::coalesce(
+            dplyr::na_if(as.character(.data$unit), ""),
+            .data$spec_unit
+          )
+        ) |>
+        dplyr::select(-"object_type", -"spec_unit")
+    }
+  }
+
   # Insert results
   if (!isTRUE(validate_only)) {
     n_inserted <- insert_results_with_con(result_data, con)
@@ -2219,6 +2241,7 @@ prompt_add_result_key_spec <- function(con, key, found_object_type) {
     return(FALSE)
   }
 
+  unit <- trimws(readline(prompt = "Unit (e.g. °C, m, bp — press Enter to skip): "))
   desc <- trimws(readline(prompt = "Description (optional, press Enter to skip): "))
 
   new_rows <- data.frame(
@@ -2226,6 +2249,7 @@ prompt_add_result_key_spec <- function(con, key, found_object_type) {
     key         = key,
     value_type  = NA_character_,
     description = if (nzchar(desc)) desc else NA_character_,
+    unit        = if (nzchar(unit)) unit else NA_character_,
     stringsAsFactors = FALSE
   )
 
