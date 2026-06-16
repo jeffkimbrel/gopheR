@@ -175,15 +175,17 @@ After confirmation: generate bundle, validate, hand off.
 
 Run after Stage 1 is ingested (objects and workflows must exist).
 
+**Every result row requires a `workflow_id`.** Results are always the output of some process — a tool run, a sequencing run, a field collection event. Never leave `workflow_id` blank. If a workflow for the tool doesn't exist yet, add it to the `workflow` sheet first (or propose it to the user). Do not invent a generic "metadata" workflow to avoid this.
+
 **Results — infer from tool output files:**
 
-| Tool output | Key(s) | Notes |
+| Tool output | Key(s) | Workflow to create if missing |
 |---|---|---|
-| CheckM2 `quality_report.tsv` | `completeness`, `contamination` | Match `Name` col to object IDs; show mapping |
-| QUAST `report.tsv` | `total_length`, `N50`, `n_contigs`, `gc_content` | Show column → key mapping |
-| seqkit stats | `total_length`, `n_contigs`, `mean_read_length` | Varies by mode |
-| GTDB-Tk `*.summary.tsv` | `GTDB_taxonomy` | Use `classification` column as-is |
-| Coverage TSV | `mean_coverage`, `breadth` | Per-object only; edge-level coverage goes in Stage 4 |
+| CheckM2 `quality_report.tsv` | `completeness`, `contamination` | `checkm2_{site}_{YYYY-MM}` |
+| QUAST `report.tsv` | `total_length`, `N50`, `n_contigs`, `gc_content` | `quast_{site}_{YYYY-MM}` |
+| seqkit stats | `total_length`, `n_contigs`, `mean_read_length` | `seqkit_{site}_{YYYY-MM}` |
+| GTDB-Tk `*.summary.tsv` | `GTDB_taxonomy` | `gtdbtk_{site}_{YYYY-MM}` |
+| Coverage TSV | `mean_coverage`, `breadth` | workflow that produced the coverage |
 
 Always show the column-to-key mapping before writing result rows. Tool column names rarely match gopheR key names exactly.
 
