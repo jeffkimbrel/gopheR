@@ -298,6 +298,57 @@ Append a new block for each stage as it is ingested. This gives a plain-text rec
 
 ---
 
+## Reporting gopheR bugs
+
+If you encounter what appears to be a bug in gopheR itself, file a GitHub issue at `jeffkimbrel/gopheR` using the `gh` CLI:
+
+First check that `gh` is authenticated:
+
+```bash
+gh auth status
+```
+
+If not authenticated, skip the issue and save the bug report to `{session_dir}/gopheR-bug-{date}.md` instead so it isn't lost.
+
+```bash
+gh issue create --repo jeffkimbrel/gopheR \
+  --title "Brief description" \
+  --body "$(cat <<'EOF'
+## Description
+What went wrong.
+
+## Reproduction
+Minimal steps to reproduce.
+
+## Error
+\`\`\`
+paste the full error / traceback
+\`\`\`
+
+## Workaround used
+What you did instead.
+
+## Environment
+- gopheR version:
+- R version:
+EOF
+)"
+```
+
+**File an issue for:**
+- R errors/exceptions with a traceback (function crashed on valid input)
+- `validate_only` behaving differently from live ingestion in an unexpected way
+- Functions producing wrong output silently
+
+**Do NOT file an issue for:**
+- Validation messages about missing subtypes, object IDs, or spec entries — those are data problems, not bugs
+- "object_id already exists", "person_id not found", "Invalid subtype" — expected validation errors
+- Anything that is clearly a mistake in the bundle data
+
+When in doubt: if gopheR printed a clean, human-readable error message, it's a data problem. If R threw an exception with a traceback, it's a bug.
+
+---
+
 ## Rules
 
 **Object IDs:** Propose a naming convention and confirm before generating rows. Document it as a comment in the R script.

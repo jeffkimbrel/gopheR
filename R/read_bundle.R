@@ -1699,13 +1699,18 @@ validate_results_with_con <- function(result_data, con, validate_only = FALSE) {
     ))
   }
 
-  # Check 2: workflow_id must exist
-  missing_workflows <- setdiff(result_data$workflow_id, all_workflows$workflow_id)
-  if (length(missing_workflows) > 0) {
-    errors <- c(errors, sprintf(
-      "Result workflow_ids not found: %s",
-      paste(missing_workflows, collapse = ", ")
-    ))
+  # Check 2: workflow_id must exist (only for non-empty values — workflow_id is optional)
+  if ("workflow_id" %in% names(result_data)) {
+    provided_workflows <- result_data$workflow_id[!is.na(result_data$workflow_id) & nzchar(result_data$workflow_id)]
+    if (length(provided_workflows) > 0) {
+      missing_workflows <- setdiff(provided_workflows, all_workflows$workflow_id)
+      if (length(missing_workflows) > 0) {
+        errors <- c(errors, sprintf(
+          "Result workflow_ids not found: %s",
+          paste(missing_workflows, collapse = ", ")
+        ))
+      }
+    }
   }
 
   # Check 3: Keys must be valid per key_spec
@@ -1768,7 +1773,10 @@ insert_results_with_con <- function(result_data, con) {
   insert_cols <- intersect(names(result_data), db_cols)
   insert_data <- result_data[, insert_cols, drop = FALSE]
 
-  # Insert into database
+  if ("workflow_id" %in% names(insert_data)) {
+    insert_data$workflow_id[!is.na(insert_data$workflow_id) & !nzchar(insert_data$workflow_id)] <- NA
+  }
+
   DBI::dbWriteTable(
     con,
     "object_result",
