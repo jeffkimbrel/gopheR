@@ -261,3 +261,74 @@ copy_den_spec <- function(from, to) {
     if (nrow(data) > 0) DBI::dbAppendTable(con_to, tbl, data)
   }
 }
+
+#' Migrate an existing den database to the current schema
+#'
+#' Applies schema changes that cannot be handled by simple column additions,
+#' such as dropping NOT NULL constraints. Safe to run on dens that are already
+#' up to date — changes are only applied when needed.
+#'
+#' @param db_path Character. Path to a `.den` SQLite file or den directory.
+#' @returns Invisibly returns `db_path`.
+#' @export
+migrate_den_schema <- function(db_path) {
+  db_path <- resolve_den_path(db_path)
+  con <- DBI::dbConnect(RSQLite::SQLite(), db_path, extended_types = TRUE)
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
+
+  nullable_workflow_id <- list(
+    object_result = "
+      CREATE TABLE object_result_new (
+        result_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+        object_id    TEXT NOT NULL,
+        workflow_id  TEXT,
+        key          TEXT NOT NULL,
+        value        TEXT NOT NULL,
+        unit         TEXT,
+        FOREIGN KEY (object_id)   REFERENCES object(object_id)   ON DELETE CASCADE,
+        FOREIGN KEY (workflow_id) REFERENCES workflow(workflow_id)
+      )",
+    edge_result = "
+      CREATE TABLE edge_result_new (
+        edge_result_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+        edge_id         INTEGER NOT NULL,
+        workflow_id     TEXT,
+        key             TEXT NOT NULL,
+        value           TEXT NOT NULL,
+        unit            TEXT,
+        FOREIGN KEY (edge_id)     REFERENCES edge(edge_id)         ON DELETE CASCADE,
+        FOREIGN KEY (workflow_id) REFERENCES workflow(workflow_id)
+      )"
+  )
+
+  DBI::dbExecute(con, "PRAGMA foreign_keys = OFF")
+  migrated <- character()
+
+  for (tbl in names(nullable_workflow_id)) {
+    schema <- DBI::dbGetQuery(con, sprintf(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='%s'", tbl
+    ))$sql
+    if (length(schema) == 0 || !grepl("workflow_id\\s+TEXT\\s+NOT NULL", schema)) next
+
+    new_tbl  <- paste0(tbl, "_new")
+    DBI::dbExecute(con, nullable_workflow_id[[tbl]])
+    DBI::dbExecute(con, sprintf("INSERT INTO %s SELECT * FROM %s", new_tbl, tbl))
+    DBI::dbExecute(con, sprintf("DROP TABLE %s", tbl))
+    DBI::dbExecute(con, sprintf("ALTER TABLE %s RENAME TO %s", new_tbl, tbl))
+    migrated <- c(migrated, tbl)
+  }
+
+  if ("edge_result" %in% migrated) {
+    DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_edge_result_edge ON edge_result(edge_id)")
+  }
+
+  DBI::dbExecute(con, "PRAGMA foreign_keys = ON")
+
+  if (length(migrated) > 0) {
+    cli::cli_alert_success("Migrated {.path {db_path}}: nullable workflow_id in {.val {migrated}}")
+  } else {
+    cli::cli_alert_info("{.path {db_path}} is already up to date.")
+  }
+
+  invisible(db_path)
+}
