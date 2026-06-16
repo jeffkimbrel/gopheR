@@ -22,17 +22,19 @@ You do **not** ingest bundles. You produce an Excel file, run a dry-run validati
 
 A bundle created by `write_bundle()` has exactly these sheets — no others:
 
-| Sheet | Columns | When used |
+| Sheet | Column order (exact) | When used |
 |---|---|---|
 | `spec` | (read-only reference) | Always — lists valid type:subtype combinations |
-| `people` | `person_id`, `full_name`, `email` | Stage 1 (only if `people_sheet = TRUE`) |
-| `workflow` | `workflow_id`, `description`, `workflow_date`, `created_by`, `category` | Stage 1 |
+| `people` | `person_id`, `full_name`, `email`, `successor_person_id` | Stage 1 (only if `people_sheet = TRUE`) |
+| `workflow` | `workflow_id`, `description`, `created_by`, `workflow_date` | Stage 1 |
 | `object` | `object_id`, `object_type`, `label`, `description`, `created_by` | Stage 1 |
-| `edge` | `child_id`, `edge_type`, `parent_id`, `workflow_id` | Stage 2 |
-| `object_result` | `object_id`, `key`, `value`, `unit`, `workflow_id` | Stage 3 |
-| `object_file` | `object_id`, `file_role`, `file_path`, `workflow_id`, `checksum` | Stage 3 |
-| `workflow_file` | `workflow_id`, `file_role`, `file_path`, `checksum` | Stage 3 |
-| `edge_result` | `child_id`, `edge_type`, `parent_id`, `key`, `value`, `unit`, `workflow_id` | Stage 4 |
+| `edge` | `parent_id`, `child_id`, `edge_type`, `workflow_id` | Stage 2 |
+| `object_result` | `object_id`, `workflow_id`, `key`, `value`, `unit` | Stage 3 |
+| `object_file` | `object_id`, `file_role`, `file_path`, `file_format`, `workflow_id`, `checksum` | Stage 3 |
+| `workflow_file` | `workflow_id`, `file_role`, `file_path`, `file_format`, `checksum` | Stage 3 |
+| `edge_result` | `parent_id`, `child_id`, `edge_type`, `workflow_id`, `key`, `value`, `unit` | Stage 4 |
+
+**Column order is critical.** The template headers come directly from the SQLite schema — your data frame columns must match exactly. After calling `write_bundle()`, always verify headers before writing data (see "Template header verification" below).
 
 **ALL objects — regardless of type — go in the `object` sheet.** There are no per-type sheets (`site`, `sample`, `genome`, etc.). The `object_type` column encodes both type and subtype as `type:subtype` (e.g. `site:raceway`, `genome:MAG`, `sample:water`). Objects without subtypes use just the base type (e.g. `study`, `site`).
 
@@ -72,6 +74,87 @@ Then ask the user to share a file listing (or scan locally if the path is access
 ```bash
 find /path/to/files -type f | sort
 ```
+
+---
+
+## Pre-flight checks
+
+Run these before generating any bundle. Catch problems early — not at ingestion time.
+
+```r
+library(gopheR)
+library(DBI)
+
+gopheR::use_db("<absolute_path_to_den_file>.den")
+con <- gopheR::gopher_con()
+
+# 1. Database lock check — fails immediately if GopherScout or another process has the file open
+tryCatch({
+  DBI::dbExecute(con, 'BEGIN IMMEDIATE')
+  DBI::dbExecute(con, 'ROLLBACK')
+  message("✓ Database not locked")
+}, error = function(e) {
+  message("✗ Database locked — close GopherScout or other connections and retry")
+  stop(e)
+})
+
+# 2. Spec checks — run these for each sheet type you plan to use
+# workflow_file roles:
+if (using_workflow_files) {
+  spec_roles <- DBI::dbGetQuery(con, "SELECT file_role FROM workflow_file_type_spec")$file_role
+  missing <- setdiff(my_file_roles, spec_roles)
+  if (length(missing) > 0) stop("Missing workflow_file_type_spec entries: ", paste(missing, collapse = ", "))
+  message("✓ All workflow file roles in spec")
+}
+
+# object_file roles:
+if (using_object_files) {
+  spec_roles <- DBI::dbGetQuery(con, "SELECT file_role FROM object_file_type_spec")$file_role
+  missing <- setdiff(my_file_roles, spec_roles)
+  if (length(missing) > 0) stop("Missing object_file_type_spec entries: ", paste(missing, collapse = ", "))
+  message("✓ All object file roles in spec")
+}
+
+# edge types:
+if (using_edges) {
+  spec_edges <- DBI::dbGetQuery(con, "SELECT edge_type FROM edge_spec")$edge_type
+  missing <- setdiff(my_edge_types, spec_edges)
+  if (length(missing) > 0) stop("Missing edge_spec entries: ", paste(missing, collapse = ", "))
+  message("✓ All edge types in spec")
+}
+
+# result keys:
+if (using_object_results) {
+  spec_keys <- DBI::dbGetQuery(con, "SELECT key FROM object_result_spec")$key
+  missing <- setdiff(my_result_keys, spec_keys)
+  if (length(missing) > 0) stop("Missing object_result_spec entries: ", paste(missing, collapse = ", "))
+  message("✓ All result keys in spec")
+}
+
+DBI::dbDisconnect(con)
+```
+
+If the lock check fails, ask the user to close GopherScout (or run `lsof "<path>.den"` to identify the process). If a spec check fails, add the missing entries to the spec first — either via a small interactive bundle or direct SQL — before generating the main bundle.
+
+**SPEC-FIRST RULE:** Before using any `file_role`, `edge_type`, or result `key` in a bundle, confirm it exists in the corresponding spec table. If it's missing, add it to the spec first. Do not proceed with bundle generation if spec entries are missing.
+
+---
+
+## Template header verification
+
+After calling `write_bundle()`, always read the template headers before writing data. This catches column order mismatches immediately:
+
+```r
+gopheR::write_bundle("{session_dir}/bundle_stage{N}.xlsx")
+
+# Show actual column order for each sheet you plan to fill
+for (sheet in c("workflow", "object", "edge", "object_result")) {
+  wb_check <- openxlsx::read.xlsx("{session_dir}/bundle_stage{N}.xlsx", sheet = sheet, rows = 1)
+  message(sheet, ": ", paste(names(wb_check), collapse = ", "))
+}
+```
+
+Your data frame columns must match these headers exactly, in the same order. If they differ, reorder the data frame — do not rename columns to match a guessed order.
 
 ---
 
@@ -147,10 +230,22 @@ Query the database first to confirm what objects are now present:
 sqlite3 <database_path> "SELECT object_id, object_type FROM object ORDER BY object_type, object_id;"
 ```
 
-Edge direction: **"child IS edge_type OF parent"**
-- `(child=readset, edge_type=derived_from, parent=sample)` → "readset is derived_from sample"
-- `(child=assembly, edge_type=assembled_from, parent=readset)` → "assembly is assembled_from readset"
-- `(child=genome, edge_type=binned_from, parent=assembly)` → "genome is binned_from assembly"
+```
+┌─ EDGE DIRECTION ─────────────────────────────────────────────┐
+│ Semantic: "child IS edge_type OF parent"                     │
+│                                                              │
+│ Examples:                                                    │
+│   readset   derived_from    sample     (readset of sample)   │
+│   assembly  assembled_from  readset    (assembly of readset) │
+│   genome    binned_from     assembly   (genome of assembly)  │
+│   non-rep   dereplicated_into  rep     (non-rep of rep)      │
+│                                                              │
+│ Bundle column order: parent_id, child_id, edge_type,         │
+│                      workflow_id                             │
+│                                                              │
+│ Common mistake: swapping parent_id and child_id              │
+└──────────────────────────────────────────────────────────────┘
+```
 
 **Present a draft:**
 
@@ -239,7 +334,20 @@ Present a draft and flag any keys not in `edge_result_spec`. Generate bundle, va
 
 For each stage, use a datestamp (`YYYY-MM-DD`) in all filenames so nothing gets overwritten across sessions.
 
-All agent-generated files go in a session subfolder under `archive/agent/`. At the start of each session, create one folder named `archive/agent/{YYYY-MM-DD}_{HHMM}/` (e.g. `archive/agent/2026-06-15_1430/`) and use it for everything: R scripts, draft Excel bundles, and decision logs. If a folder for that minute already exists, append `_b`, `_c`, etc. Do not create dens, databases, or additional subdirectories inside the session folder.
+All agent-generated files go in a session subfolder under `archive/agent/`. At the start of each session, create one folder named `archive/agent/{YYYY-MM-DD}_{HHMM}/` (e.g. `archive/agent/2026-06-15_1430/`) and use it for everything. If a folder for that minute already exists, append `_b`, `_c`, etc. Do not create dens, databases, or additional subdirectories inside the session folder.
+
+```
+archive/agent/2026-06-15_1430/
+├── bundle_stage1.xlsx          (generated template)
+├── bundle_stage1_draft.xlsx    (populated, ready to ingest)
+├── stage1_script.R             (R script that built the bundle)
+├── stage1-decisions.md         (mapping decisions)
+├── bundle_stage2.xlsx
+├── stage2_script.R
+└── session.log                 (appended after each stage is ingested)
+```
+
+Naming: scripts as `stage{N}_script.R`, bundles as `bundle_stage{N}.xlsx` / `bundle_stage{N}_draft.xlsx`.
 
 **R script** — write to `archive/agent/fill-bundle-stage{N}-{date}.R` and execute it. Always begin the script with `use_db()` pointed at the den database so every gopheR call in the session uses the correct database regardless of where R is running.
 
@@ -281,7 +389,24 @@ Execute the R script. Show the full validation output to the user. If it passes,
 > `gopheR::read_bundle("{session_dir}/bundle_stage1_draft.xlsx", default_user = "<person_id>")`
 > Let me know when it's done and I'll move to Stage 2."
 
-If validation fails, diagnose the error, fix the R script, re-run it, and re-validate before handing off.
+If validation fails, diagnose using this order:
+
+1. **Database locked?** — error mentions "locked" or timeout → close GopherScout, re-run
+2. **Unknown file_role / edge_type / result key?** — query the spec table; add the entry first, then regenerate
+3. **Missing object_id, workflow_id, parent/child?** — query the DB to verify IDs exist; create them in an earlier stage
+4. **Column order wrong?** — re-read template headers with `read.xlsx(..., rows = 1)`; reorder your data frame
+5. **Type mismatch?** — ensure all columns are `character`; use `as.character()` on numeric values
+6. **Still failing?** — open the bundle Excel file manually and compare against a working prior-stage bundle; if gopheR threw a traceback (not a clean validation message), file a bug issue
+
+Fix the R script, re-run it, and re-validate before handing off.
+
+If ingestion fails with a database error (locked, busy, unable to write), check whether another process has the `.den` file open before assuming a code problem:
+
+```bash
+lsof "<absolute_path_to_den_file>.den"
+```
+
+If GopherScout (or any other process) appears in the output, tell the user to close it and retry. SQLite cannot write while another process holds the file open.
 
 **After the user confirms ingestion succeeded**, offer to write `{session_dir}/session.log` summarising what was ingested:
 
