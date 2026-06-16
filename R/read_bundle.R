@@ -1824,7 +1824,7 @@ ingest_object_files_with_con <- function(wb, con, validate_only = FALSE) {
 
   cli::cli_alert_info("Found {nrow(file_data)} object_file(s) in bundle.")
 
-  # In validate_only mode, objects/workflows haven't been inserted yet — read
+  # In validate_only mode, objects/workflows haven't been inserted yet -- read
   # them from the bundle so FK checks work against bundle data.
   bundle_objects <- NULL
   bundle_workflows <- NULL
@@ -1872,7 +1872,7 @@ validate_object_files_with_con <- function(file_data, con, validate_only = FALSE
 
   errors <- character()
 
-  # Get all objects — in validate_only mode, also include bundle objects since
+  # Get all objects -- in validate_only mode, also include bundle objects since
   # they haven't been inserted into the DB yet.
   all_objects <- DBI::dbReadTable(con, "object")
   if (validate_only && !is.null(bundle_objects) && nrow(bundle_objects) > 0) {
@@ -1886,7 +1886,7 @@ validate_object_files_with_con <- function(file_data, con, validate_only = FALSE
       dplyr::distinct(.data$object_id, .keep_all = TRUE)
   }
 
-  # Get all workflows — same treatment for validate_only mode.
+  # Get all workflows -- same treatment for validate_only mode.
   all_workflows <- DBI::dbReadTable(con, "workflow")
   if (validate_only && !is.null(bundle_workflows) && nrow(bundle_workflows) > 0) {
     all_workflows <- dplyr::bind_rows(all_workflows, bundle_workflows) |>
@@ -2205,7 +2205,7 @@ ingest_workflow_files_with_con <- function(wb, con, validate_only = FALSE) {
 }
 
 
-# ── Interactive spec helpers ───────────────────────────────────────────────────
+# -- Interactive spec helpers ---------------------------------------------------
 
 #' Interactively add a new file_role to object_file_type_spec
 #'
@@ -2280,7 +2280,7 @@ prompt_add_result_key_spec <- function(con, key, found_object_type) {
     return(FALSE)
   }
 
-  unit <- trimws(readline(prompt = "Unit (e.g. °C, m, bp — press Enter to skip): "))
+  unit <- trimws(readline(prompt = "Unit (e.g. degC, m, bp -- press Enter to skip): "))
   desc <- trimws(readline(prompt = "Description (optional, press Enter to skip): "))
 
   new_rows <- data.frame(

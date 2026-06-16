@@ -2,14 +2,14 @@ test_that("split_object_type splits combined types correctly", {
   # Create test data with combined type:subtype
   test_df <- data.frame(
     object_id = c("obj1", "obj2", "obj3"),
-    object_type = c("genome:MAG", "readset:paired_end", "assembly:metagenome"),
+    object_type = c("genome:MAG", "readset:shotgun", "assembly:metagenome"),
     stringsAsFactors = FALSE
   )
 
   result <- split_object_type(test_df)
 
   expect_equal(result$object_type, c("genome", "readset", "assembly"))
-  expect_equal(result$object_subtype, c("MAG", "paired_end", "metagenome"))
+  expect_equal(result$object_subtype, c("MAG", "shotgun", "metagenome"))
 })
 
 
@@ -32,14 +32,14 @@ test_that("split_object_type handles mixed data", {
   # Mix of with and without subtypes
   test_df <- data.frame(
     object_id = c("obj1", "obj2", "obj3"),
-    object_type = c("genome:MAG", "study", "readset:paired_end"),
+    object_type = c("genome:MAG", "study", "readset:shotgun"),
     stringsAsFactors = FALSE
   )
 
   result <- split_object_type(test_df)
 
   expect_equal(result$object_type, c("genome", "study", "readset"))
-  expect_equal(result$object_subtype, c("MAG", NA_character_, "paired_end"))
+  expect_equal(result$object_subtype, c("MAG", NA_character_, "shotgun"))
 })
 
 
@@ -61,7 +61,7 @@ test_that("split_object_type preserves other columns", {
   # Data with multiple columns
   test_df <- data.frame(
     object_id = c("obj1", "obj2"),
-    object_type = c("genome:MAG", "readset:paired_end"),
+    object_type = c("genome:MAG", "readset:shotgun"),
     label = c("Genome 1", "Readset 1"),
     description = c("A genome", "A readset"),
     stringsAsFactors = FALSE
@@ -73,5 +73,5 @@ test_that("split_object_type preserves other columns", {
   expect_equal(result$label, c("Genome 1", "Readset 1"))
   expect_equal(result$description, c("A genome", "A readset"))
   expect_equal(result$object_type, c("genome", "readset"))
-  expect_equal(result$object_subtype, c("MAG", "paired_end"))
+  expect_equal(result$object_subtype, c("MAG", "shotgun"))
 })

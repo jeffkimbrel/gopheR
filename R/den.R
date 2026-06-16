@@ -70,7 +70,8 @@ initialize_den <- function(path, name, create_examples = FALSE, template_den = N
     den_path,
     file.path(den_path, "archive", "dens"),
     file.path(den_path, "archive", "bundles"),
-    file.path(den_path, "archive", "agent")
+    file.path(den_path, "archive", "agent"),
+    file.path(den_path, "archive", "clustering")
   )
   # examples/ intentionally omitted until create_examples is implemented
 
@@ -114,7 +115,7 @@ initialize_den <- function(path, name, create_examples = FALSE, template_den = N
       "# so the agent can make accurate first-pass inferences from your files.",
       "# agent_context: |",
       "#   Samples from the XYZ site (IDs: XYZ_S01-XYZ_S20).",
-      "#   Pipeline: MEGAHIT assembly → MetaWRAP binning → CheckM2 quality → GTDB-Tk taxonomy.",
+      "#   Pipeline: MEGAHIT assembly -> MetaWRAP binning -> CheckM2 quality -> GTDB-Tk taxonomy.",
       "#   Genome IDs: m{site}_{bin_zero_padded_3}  e.g. mXYZ_001",
       "#   Workflow IDs: {tool}_{site}_{YYYY-MM}  e.g. megahit_XYZ_2025-03",
       "#   Files live at: /data/XYZ/"
@@ -257,7 +258,12 @@ copy_den_spec <- function(from, to) {
     if (!tbl %in% from_tables) next
     if (!tbl %in% to_tables)   next
     data <- DBI::dbReadTable(con_from, tbl)
-    DBI::dbExecute(con_to, paste0("DELETE FROM \"", tbl, "\""))
-    if (nrow(data) > 0) DBI::dbAppendTable(con_to, tbl, data)
+    if (nrow(data) > 0) {
+      tmp <- paste0("tmp_spec_", tbl)
+      DBI::dbWriteTable(con_to, tmp, data, temporary = TRUE, overwrite = TRUE)
+      DBI::dbExecute(con_to, sprintf(
+        'INSERT OR IGNORE INTO "%s" SELECT * FROM "%s"', tbl, tmp
+      ))
+    }
   }
 }

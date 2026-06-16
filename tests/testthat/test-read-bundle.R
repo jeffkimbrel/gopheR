@@ -11,7 +11,7 @@ test_that("read_bundle validates and inserts objects successfully", {
 
   test_objects <- data.frame(
     object_id = c("obj1", "obj2", "obj3"),
-    object_type = c("genome:MAG", "readset:paired_end", "assembly:metagenome"),
+    object_type = c("genome:MAG", "readset:shotgun", "assembly:metagenome"),
     label = c(NA, NA, NA),
     description = c(NA, NA, NA),
     created_by = c(NA, NA, NA),
@@ -130,7 +130,7 @@ test_that("read_bundle returns summary results", {
 
   test_objects <- data.frame(
     object_id = c("obj1", "obj2", "obj3"),
-    object_type = c("genome:MAG", "genome:isolate", "readset:paired_end"),
+    object_type = c("genome:MAG", "genome:isolate", "readset:shotgun"),
     label = c(NA, NA, NA),
     description = c(NA, NA, NA),
     created_by = c(NA, NA, NA),

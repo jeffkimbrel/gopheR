@@ -17,7 +17,7 @@ test_that("read_bundle ingests object_files successfully", {
   test_objects <- data.frame(
     object_id = c("genome001", "readset001"),
     object_type = c("genome", "readset"),
-    object_subtype = c("MAG", "paired_end"),
+    object_subtype = c("MAG", "shotgun"),
     label = c(NA, NA),
     description = c(NA, NA),
     created_by = c(NA, NA),

@@ -1,6 +1,6 @@
 # Amplicon / ASV Schema Planning
 
-**Status:** Design phase — nothing implemented yet
+**Status:** Phases 1-3 implemented in gopheR 0.6.0.9000 — awaiting real-data validation
 
 ---
 
@@ -96,12 +96,14 @@ A `merge_abundances()` function (or agent task) can reconstruct a unified cross-
 
 Amplicon data does not fit the Excel bundle format — it comes from machine-generated tool output at scales that don't belong in spreadsheets. Dedicated ingest functions read tool output directly:
 
-| Function | Reads | Populates |
-|---|---|---|
-| `read_amplicon(count_table, asv_batch_id, workflow_id)` | DADA2/QIIME2 count TSV | `asv`, `amplicon_asv`, `workflow_file` |
-| `read_clustering(vsearch_output, workflow_id)` | clustering tool output | `asv_cluster`, triggers `trim_clustering()` |
-| `read_taxonomy(classifier_output, workflow_id)` | SILVA/RDP output TSV | `asv_taxonomy` |
-| `merge_abundances(primer_set_id, cluster_type)` | abundance TSVs via `workflow_file` | returns merged matrix in R |
+| Function | Reads | Populates | Status |
+|---|---|---|---|
+| `read_amplicon(count_table, asv_batch_id, workflow_id, fasta_path, sample_map)` | DADA2 count TSV + FASTA | `asv`, `amplicon_asv`, `workflow_file` | **Done** |
+| `read_taxonomy(taxonomy_table, workflow_id, asv_batch_id)` | SILVA/RDP two-col TSV | `asv_taxonomy` | **Done** |
+| `read_clustering(clustering_output, workflow_id, cluster_type, primer_set_id)` | Two-col TSV (member, rep) or VSEARCH UC | `asv_cluster`, triggers `trim_clustering()` | **Done** |
+| `trim_clustering(primer_set_id, cluster_type, keep_workflow_id)` | -- | Archives old runs to `archive/clustering/*.json`, removes from DB | **Done** |
+| `restore_clustering(workflow_id)` | JSON archive | Re-inserts rows into `asv_cluster` | **Done** |
+| `merge_abundances(primer_set_id, cluster_type)` | abundance TSVs via `workflow_file` | returns merged matrix in R | **Roadmap** |
 
 The regular Excel bundle handles everything upstream: sample objects, readset objects, `asv_batch` objects, their edges, and workflow metadata. These functions take over once the provenance scaffolding is in place.
 
@@ -291,5 +293,38 @@ PacBio 16S and Illumina 16S both produce `readset:16S_V4` — they belong in the
 ## Open questions
 
 - `cluster_type_spec` table vs. free text: free text is probably fine given the small number of real-world values (`cluster97`, `cluster99`). Defer until there's a reason to constrain.
-- `cluster_result` table: not needed — cluster size and other per-cluster stats are computable from `asv_cluster` on demand.
-- **Database size:** Rough estimate for 5 studies, 50K unique ASVs, 5 re-clusters, 2 taxonomy classifiers: ~85–110MB with SQLite overhead. Addressed by the clustering archive pattern, which keeps `asv_cluster` bounded to one run per primer set at a time.
+- `cluster_result` table: not needed -- cluster size and other per-cluster stats are computable from `asv_cluster` on demand.
+- **Database size:** Rough estimate for 5 studies, 50K unique ASVs, 5 re-clusters, 2 taxonomy classifiers: ~85-110MB with SQLite overhead. Addressed by the clustering archive pattern, which keeps `asv_cluster` bounded to one run per primer set at a time.
+
+---
+
+## Roadmap
+
+### `merge_abundances(primer_set_id, cluster_type, workflow_id = NULL)`
+
+Deferred until Phase 1-3 has been validated on real data.
+
+**What it does:**
+1. Find all `asv_batch` objects with `object_subtype == primer_set_id`
+2. For each batch, locate its abundance matrix TSV via `workflow_file(file_role = "abundance_matrix")`
+3. Read each TSV; remap local ASV labels -> `asv_id` via `amplicon_asv`
+4. Join `asv_id` -> `cluster_id` via `asv_cluster` for the given `cluster_type` (most recent workflow if `workflow_id = NULL`)
+5. Sum abundance across ASVs that collapsed into the same cluster
+6. Outer-join all study matrices on sample columns
+7. Return merged tibble: rows = cluster_ids, columns = all sample readset IDs
+
+**Dependencies that must work first:**
+- `read_amplicon()` must have populated `amplicon_asv` with correct label -> asv_id mappings
+- `read_clustering()` must have populated `asv_cluster` with correct cluster assignments
+- `workflow_file` must have valid paths to abundance TSVs that still exist on disk
+- Sample column names in the TSVs must match readset object IDs (or `sample_map` was applied)
+
+### fill-bundle amplicon extension
+
+Extend `inst/.claude/commands/fill-bundle.md` with:
+- `asv_batch` object type and subtypes (V4, V3-V4, ITS2, 18S, WANDA)
+- Expected edges: `readset derived_from asv_batch`
+- Expected `object_file` roles: `asv_fasta`
+- Expected `workflow_file` roles: `abundance_matrix`, `abundance_matrix_raw`, `phylogenetic_tree`
+- `object_result` keys for `asv_batch`: `total_asvs`, `filtered_asvs`, `filter_threshold`, `median_depth`
+- Stage 3 output: generate confirmed `read_amplicon()` call with `sample_map` filled in

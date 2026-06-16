@@ -228,7 +228,7 @@ test_that("edges can reference workflows from same bundle", {
   openxlsx::addWorksheet(wb, "object")
   objects <- data.frame(
     object_id = c("read1", "asm1"),
-    object_type = c("readset:paired_end", "assembly:metagenome"),
+    object_type = c("readset:shotgun", "assembly:metagenome"),
     label = c(NA, NA),
     description = c(NA, NA),
     created_by = c(NA, NA),

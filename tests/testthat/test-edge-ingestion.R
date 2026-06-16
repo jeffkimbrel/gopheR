@@ -10,7 +10,7 @@ test_that("read_bundle ingests edges successfully", {
   test_objects <- data.frame(
     object_id = c("read1", "read2", "asm1"),
     object_type = c("readset", "readset", "assembly"),
-    object_subtype = c("paired_end", "paired_end", "metagenome"),
+    object_subtype = c("shotgun", "shotgun", "metagenome"),
     label = c(NA, NA, NA),
     description = c(NA, NA, NA),
     created_by = c(NA, NA, NA),
@@ -66,7 +66,7 @@ test_that("edges can reference newly inserted objects", {
   openxlsx::addWorksheet(wb, "object")
   test_objects <- data.frame(
     object_id = c("read1", "asm1"),
-    object_type = c("readset:paired_end", "assembly:metagenome"),
+    object_type = c("readset:shotgun", "assembly:metagenome"),
     label = c(NA, NA),
     description = c(NA, NA),
     created_by = c(NA, NA),
@@ -164,7 +164,7 @@ test_that("edge validation fails with invalid edge type", {
   test_objects <- data.frame(
     object_id = c("read1", "asm1"),
     object_type = c("readset", "assembly"),
-    object_subtype = c("paired_end", "metagenome"),
+    object_subtype = c("shotgun", "metagenome"),
     label = c(NA, NA),
     description = c(NA, NA),
     created_by = c(NA, NA),
@@ -256,7 +256,7 @@ test_that("edge validation detects duplicates", {
   test_objects <- data.frame(
     object_id = c("read1", "asm1"),
     object_type = c("readset", "assembly"),
-    object_subtype = c("paired_end", "metagenome"),
+    object_subtype = c("shotgun", "metagenome"),
     label = c(NA, NA),
     description = c(NA, NA),
     created_by = c(NA, NA),

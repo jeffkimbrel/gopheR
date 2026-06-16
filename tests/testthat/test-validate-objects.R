@@ -8,7 +8,7 @@ test_that("valid objects pass validation", {
   test_objects <- data.frame(
     object_id = c("obj1", "obj2", "obj3"),
     object_type = c("genome", "readset", "assembly"),
-    object_subtype = c("MAG", "paired_end", "metagenome"),
+    object_subtype = c("MAG", "shotgun", "metagenome"),
     label = c(NA, NA, NA),
     description = c(NA, NA, NA),
     created_by = c(NA, NA, NA),
@@ -101,7 +101,7 @@ test_that("duplicate object_ids in bundle fail validation", {
   test_objects <- data.frame(
     object_id = c("obj1", "obj1", "obj2"),
     object_type = c("genome", "genome", "readset"),
-    object_subtype = c("MAG", "isolate", "paired_end"),
+    object_subtype = c("MAG", "isolate", "shotgun"),
     label = c(NA, NA, NA),
     description = c(NA, NA, NA),
     created_by = c(NA, NA, NA),
@@ -145,7 +145,7 @@ test_that("duplicate object_ids against database fail validation", {
   test_objects <- data.frame(
     object_id = c("existing_obj", "new_obj"),
     object_type = c("genome", "readset"),
-    object_subtype = c("isolate", "paired_end"),
+    object_subtype = c("isolate", "shotgun"),
     label = c(NA, NA),
     description = c(NA, NA),
     created_by = c(NA, NA),
