@@ -4,7 +4,13 @@
 \alias{validate_object_files_with_con}
 \title{Validate object_files against database (with connection)}
 \usage{
-validate_object_files_with_con(file_data, con, validate_only = FALSE)
+validate_object_files_with_con(
+  file_data,
+  con,
+  validate_only = FALSE,
+  bundle_objects = NULL,
+  bundle_workflows = NULL
+)
 }
 \arguments{
 \item{file_data}{Data frame of object_files to validate}
