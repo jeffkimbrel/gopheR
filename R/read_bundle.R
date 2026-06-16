@@ -634,9 +634,8 @@ insert_objects_with_con <- function(object_data, con) {
       .data$label,
       .data$description,
       .data$created_by
-    ) |>
+    )
 
-  # Insert into database
   DBI::dbWriteTable(
     con,
     "object",
@@ -1826,8 +1825,19 @@ ingest_object_files_with_con <- function(wb, con, validate_only = FALSE) {
 
   cli::cli_alert_info("Found {nrow(file_data)} object_file(s) in bundle.")
 
+  # In validate_only mode, objects/workflows haven't been inserted yet — read
+  # them from the bundle so FK checks work against bundle data.
+  bundle_objects <- NULL
+  bundle_workflows <- NULL
+  if (isTRUE(validate_only)) {
+    bundle_objects   <- tryCatch(openxlsx::read.xlsx(wb, sheet = "object"),   error = function(e) NULL)
+    bundle_workflows <- tryCatch(openxlsx::read.xlsx(wb, sheet = "workflow"), error = function(e) NULL)
+  }
+
   # Validate
-  validation_result <- validate_object_files_with_con(file_data, con, validate_only = validate_only)
+  validation_result <- validate_object_files_with_con(file_data, con, validate_only = validate_only,
+                                                       bundle_objects = bundle_objects,
+                                                       bundle_workflows = bundle_workflows)
   if (!validation_result$valid) {
     cli::cli_abort(validation_result$message)
   }
@@ -1858,15 +1868,31 @@ ingest_object_files_with_con <- function(wb, con, validate_only = FALSE) {
 #'
 #' @return List with valid (logical) and message (character) elements
 #' @keywords internal
-validate_object_files_with_con <- function(file_data, con, validate_only = FALSE) {
+validate_object_files_with_con <- function(file_data, con, validate_only = FALSE,
+                                            bundle_objects = NULL, bundle_workflows = NULL) {
 
   errors <- character()
 
-  # Get all objects (from DB + any in current transaction)
+  # Get all objects — in validate_only mode, also include bundle objects since
+  # they haven't been inserted into the DB yet.
   all_objects <- DBI::dbReadTable(con, "object")
+  if (validate_only && !is.null(bundle_objects) && nrow(bundle_objects) > 0) {
+    bundle_obj_norm <- bundle_objects |>
+      dplyr::mutate(
+        object_subtype = dplyr::if_else(grepl(":", .data$object_type),
+                                         sub(".*:", "", .data$object_type), NA_character_),
+        object_type    = sub(":.*", "", .data$object_type)
+      )
+    all_objects <- dplyr::bind_rows(all_objects, bundle_obj_norm) |>
+      dplyr::distinct(.data$object_id, .keep_all = TRUE)
+  }
 
-  # Get all workflows (from DB + any in current transaction) if workflow_id used
+  # Get all workflows — same treatment for validate_only mode.
   all_workflows <- DBI::dbReadTable(con, "workflow")
+  if (validate_only && !is.null(bundle_workflows) && nrow(bundle_workflows) > 0) {
+    all_workflows <- dplyr::bind_rows(all_workflows, bundle_workflows) |>
+      dplyr::distinct(.data$workflow_id, .keep_all = TRUE)
+  }
 
   # Get file role spec
   file_role_spec <- DBI::dbReadTable(con, "object_file_type_spec")
