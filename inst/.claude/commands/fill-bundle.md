@@ -14,6 +14,30 @@ A good opening message:
 
 You do **not** ingest bundles. You produce an Excel file, run a dry-run validation, and hand off to the user to run `read_bundle()` for real.
 
+**You are always working inside an existing den.** The user ran `initialize_den()` before invoking you — the den, its database, and its spec tables already exist. Your job starts after that. Never call `initialize_den()` yourself.
+
+---
+
+## Bundle structure
+
+A bundle created by `write_bundle()` has exactly these sheets — no others:
+
+| Sheet | Columns | When used |
+|---|---|---|
+| `spec` | (read-only reference) | Always — lists valid type:subtype combinations |
+| `people` | `person_id`, `full_name`, `email` | Stage 1 (only if `people_sheet = TRUE`) |
+| `workflow` | `workflow_id`, `description`, `workflow_date`, `created_by`, `category` | Stage 1 |
+| `object` | `object_id`, `object_type`, `label`, `description`, `created_by` | Stage 1 |
+| `edge` | `child_id`, `edge_type`, `parent_id`, `workflow_id` | Stage 2 |
+| `object_result` | `object_id`, `key`, `value`, `unit`, `workflow_id` | Stage 3 |
+| `object_file` | `object_id`, `file_role`, `file_path`, `workflow_id`, `checksum` | Stage 3 |
+| `workflow_file` | `workflow_id`, `file_role`, `file_path`, `checksum` | Stage 3 |
+| `edge_result` | `child_id`, `edge_type`, `parent_id`, `key`, `value`, `unit`, `workflow_id` | Stage 4 |
+
+**ALL objects — regardless of type — go in the `object` sheet.** There are no per-type sheets (`site`, `sample`, `genome`, etc.). The `object_type` column encodes both type and subtype as `type:subtype` (e.g. `site:raceway`, `genome:MAG`, `sample:water`). Objects without subtypes use just the base type (e.g. `study`, `site`).
+
+Do not invent sheet names. Write only to the sheets listed above.
+
 ---
 
 ## Setup: Read the den
@@ -61,11 +85,24 @@ Work through these in order. Complete each stage fully — produce bundle, valid
 
 Everything else references these. Do this first.
 
+**Important: object type + subtype encoding**
+
+The bundle's `object` sheet has a single `object_type` column — there is **no separate `object_subtype` column**. Type and subtype are encoded together as `type:subtype` (e.g. `genome:MAG`, `readset:paired_end`, `assembly:metagenome`). `read_bundle()` splits on `:` at ingestion. Always write the combined form in your R script.
+
+**After calling `write_bundle()`, read the `spec` sheet from the generated Excel file to get the exact valid `type:subtype` strings for this project before writing any object rows:**
+
+```r
+spec_df <- openxlsx::readWorkbook("{session_dir}/bundle_stage1.xlsx", sheet = "spec")
+print(spec_df)
+```
+
+The `spec` sheet lists every valid combination (e.g. `genome:MAG`, `sample:water`, `site:raceway`). Copy these strings exactly — do not invent or guess. Objects with no subtype use the bare type name (e.g. `study`).
+
 **Infer from files:**
-- FASTQ pairs (`*_R1*` / `*_R2*`) → `readset`, subtype `paired_end`; ID from filename stem before `_R1`/`_R2`
+- FASTQ pairs (`*_R1*` / `*_R2*`) → `readset:paired_end`; ID from filename stem before `_R1`/`_R2`
 - Single-end, nanopore, PacBio: infer subtype from naming or ask
-- Assembly FASTAs in an output folder → `assembly`; ID from folder or filename stem
-- MAG/bin FASTAs in `bins/` or `MAGs/` → `genome`, subtype `MAG`; ID from filename stem using the project convention
+- Assembly FASTAs in an output folder → `assembly:metagenome`; ID from folder or filename stem
+- MAG/bin FASTAs in `bins/` or `MAGs/` → `genome:MAG`; ID from filename stem using the project convention
 - Tool output directories (SPAdes, MEGAHIT, MetaWRAP) → note for `workflow_file` in Stage 3; use directory metadata as `workflow_id` hint
 
 **For each workflow, propose or ask:**
@@ -198,24 +235,66 @@ Present a draft and flag any keys not in `edge_result_spec`. Generate bundle, va
 
 ## Producing a bundle
 
-For each stage, generate an R script that:
-1. Calls `gopheR::write_bundle("bundle_stage{N}.xlsx")` to create a blank template with spec dropdowns
-2. Uses `openxlsx` to load the workbook and populate only the sheets needed for this stage
-3. Saves the result to `bundle_stage{N}_draft.xlsx`
+For each stage, use a datestamp (`YYYY-MM-DD`) in all filenames so nothing gets overwritten across sessions.
 
-Then execute the script (if `Rscript` is available in the den) and run a dry-run validation:
+All agent-generated files go in a session subfolder under `archive/agent/`. At the start of each session, create one folder named `archive/agent/{YYYY-MM-DD}_{HHMM}/` (e.g. `archive/agent/2026-06-15_1430/`) and use it for everything: R scripts, draft Excel bundles, and decision logs. If a folder for that minute already exists, append `_b`, `_c`, etc. Do not create dens, databases, or additional subdirectories inside the session folder.
+
+**R script** — write to `archive/agent/fill-bundle-stage{N}-{date}.R` and execute it. Always begin the script with `use_db()` pointed at the den database so every gopheR call in the session uses the correct database regardless of where R is running.
+
+**Never call `initialize_den()` in any R script you generate.** That is the user's setup step, already done before you were invoked. If you think you need it, you are solving the wrong problem — stop and ask the user instead.
 
 ```r
-gopheR::read_bundle("bundle_stage1_draft.xlsx", validate_only = TRUE, default_user = "jdoe")
+library(gopheR)
+library(openxlsx)
+
+# Pin the session to this den's database
+gopheR::use_db("<absolute_path_to_den_file>.den")
+
+# Create blank template  (session_dir = archive/agent/YYYY-MM-DD_HHMM)
+gopheR::write_bundle("{session_dir}/bundle_stage{N}.xlsx")
+
+# Populate sheets
+wb <- openxlsx::loadWorkbook("{session_dir}/bundle_stage{N}.xlsx")
+# ... openxlsx writes ...
+openxlsx::saveWorkbook(wb, "{session_dir}/bundle_stage{N}_draft.xlsx", overwrite = TRUE)
+
+# Dry-run validation
+gopheR::read_bundle("{session_dir}/bundle_stage{N}_draft.xlsx",
+                    validate_only = TRUE, default_user = "<person_id>")
 ```
 
-Show the full validation output to the user. If it passes, tell the user:
+Use the absolute path to the `.den` file found in `den.yaml`. This ensures `write_bundle`, `read_bundle`, and all validation use the same database.
+
+**Decision log** — after writing the R script, write a brief `{session_dir}/stage{N}-decisions.md` recording:
+- Which files were mapped to which object IDs
+- The column-to-key mappings used for any tool output parsed
+- Any flags raised and how they were resolved
+- The naming convention chosen for object IDs
+
+This gives a human-readable record of what the agent decided, separate from the bundle itself.
+
+Execute the R script. Show the full validation output to the user. If it passes, tell the user:
 
 > "Validation passed. Run this to ingest:
-> `gopheR::read_bundle("bundle_stage1_draft.xlsx", default_user = "jdoe")`
+> `gopheR::read_bundle("{session_dir}/bundle_stage1_draft.xlsx", default_user = "<person_id>")`
 > Let me know when it's done and I'll move to Stage 2."
 
-If validation fails, diagnose the error, fix the bundle, and re-validate before handing off.
+If validation fails, diagnose the error, fix the R script, re-run it, and re-validate before handing off.
+
+**After the user confirms ingestion succeeded**, offer to write `{session_dir}/session.log` summarising what was ingested:
+
+```
+Stage {N} ingested: {date}
+  People:    {n} added
+  Workflows: {n} added
+  Objects:   {n} added ({type breakdown e.g. "3 genome:MAG, 2 readset:paired_end"})
+  Edges:     {n} added  (Stage 2+)
+  Results:   {n} added  (Stage 3+)
+  Files:     {n} added  (Stage 3+)
+  Bundle:    {session_dir}/bundle_stage{N}_draft.xlsx
+```
+
+Append a new block for each stage as it is ingested. This gives a plain-text record of the session that travels with the den.
 
 ---
 
@@ -240,6 +319,7 @@ If validation fails, diagnose the error, fix the bundle, and re-validate before 
 ## What this skill does NOT do
 
 - Ingest bundles — that is `gopheR::read_bundle()` run by the user
+- Call `initialize_den()` — the user does that before invoking this skill
 - Modify the database directly
 - Compute checksums for remote files
 - Make scientific judgments about object relationships

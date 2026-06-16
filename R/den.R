@@ -69,7 +69,8 @@ initialize_den <- function(path, name, create_examples = FALSE, template_den = N
   dirs <- c(
     den_path,
     file.path(den_path, "archive", "dens"),
-    file.path(den_path, "archive", "bundles")
+    file.path(den_path, "archive", "bundles"),
+    file.path(den_path, "archive", "agent")
   )
   # examples/ intentionally omitted until create_examples is implemented
 
@@ -160,12 +161,12 @@ initialize_den <- function(path, name, create_examples = FALSE, template_den = N
   )
   writeLines(gitignore_lines, file.path(den_path, ".gitignore"))
 
-  # --- Claude skill ---
-  skill_src <- system.file(".claude", "skills", "fill-bundle.md", package = "gopheR")
-  if (nzchar(skill_src) && file.exists(skill_src)) {
-    skill_dir <- file.path(den_path, ".claude", "skills")
-    dir.create(skill_dir, recursive = TRUE, showWarnings = FALSE)
-    file.copy(skill_src, file.path(skill_dir, "fill-bundle.md"))
+  # --- Claude custom command ---
+  cmd_src <- system.file(".claude", "commands", "fill-bundle.md", package = "gopheR")
+  if (nzchar(cmd_src) && file.exists(cmd_src)) {
+    cmd_dir <- file.path(den_path, ".claude", "commands")
+    dir.create(cmd_dir, recursive = TRUE, showWarnings = FALSE)
+    file.copy(cmd_src, file.path(cmd_dir, "fill-bundle.md"))
   }
 
   # --- git init ---

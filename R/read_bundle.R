@@ -635,9 +635,6 @@ insert_objects_with_con <- function(object_data, con) {
       .data$description,
       .data$created_by
     ) |>
-    dplyr::mutate(
-      object_subtype = dplyr::if_else(is.na(.data$object_subtype), "", .data$object_subtype)
-    )
 
   # Insert into database
   DBI::dbWriteTable(
