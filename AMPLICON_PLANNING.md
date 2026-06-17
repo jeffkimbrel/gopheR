@@ -298,33 +298,4 @@ PacBio 16S and Illumina 16S both produce `readset:16S_V4` — they belong in the
 
 ---
 
-## Roadmap
-
-### `merge_abundances(primer_set_id, cluster_type, workflow_id = NULL)`
-
-Deferred until Phase 1-3 has been validated on real data.
-
-**What it does:**
-1. Find all `asv_batch` objects with `object_subtype == primer_set_id`
-2. For each batch, locate its abundance matrix TSV via `workflow_file(file_role = "abundance_matrix")`
-3. Read each TSV; remap local ASV labels -> `asv_id` via `amplicon_asv`
-4. Join `asv_id` -> `cluster_id` via `asv_cluster` for the given `cluster_type` (most recent workflow if `workflow_id = NULL`)
-5. Sum abundance across ASVs that collapsed into the same cluster
-6. Outer-join all study matrices on sample columns
-7. Return merged tibble: rows = cluster_ids, columns = all sample readset IDs
-
-**Dependencies that must work first:**
-- `read_amplicon()` must have populated `amplicon_asv` with correct label -> asv_id mappings
-- `read_clustering()` must have populated `asv_cluster` with correct cluster assignments
-- `workflow_file` must have valid paths to abundance TSVs that still exist on disk
-- Sample column names in the TSVs must match readset object IDs (or `sample_map` was applied)
-
-### fill-bundle amplicon extension
-
-Extend `inst/.claude/commands/fill-bundle.md` with:
-- `asv_batch` object type and subtypes (V4, V3-V4, ITS2, 18S, WANDA)
-- Expected edges: `readset derived_from asv_batch`
-- Expected `object_file` roles: `asv_fasta`
-- Expected `workflow_file` roles: `abundance_matrix`, `abundance_matrix_raw`, `phylogenetic_tree`
-- `object_result` keys for `asv_batch`: `total_asvs`, `filtered_asvs`, `filter_threshold`, `median_depth`
-- Stage 3 output: generate confirmed `read_amplicon()` call with `sample_map` filled in
+See [ROADMAP.md](ROADMAP.md) for amplicon roadmap items (`merge_abundances`, fill-bundle amplicon extension).

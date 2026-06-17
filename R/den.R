@@ -189,6 +189,39 @@ initialize_den <- function(path, name, create_examples = FALSE, template_den = N
   invisible(den_path)
 }
 
+#' Update Claude skill files in an existing den
+#'
+#' Copies the latest skill files from the installed gopheR package into an
+#' existing den's `.claude/commands/` directory, overwriting stale versions.
+#' Run this after upgrading gopheR to pick up updated agent prompts.
+#'
+#' @param den_path Character. Path to the den directory. Defaults to
+#'   `find_den_root()` (walks up from the working directory).
+#'
+#' @returns Invisibly returns the den path.
+#' @export
+
+update_den_skills <- function(den_path = NULL) {
+  if (is.null(den_path)) {
+    den_path <- find_den_root()
+    if (is.null(den_path)) cli::cli_abort("Not inside a den and no den_path provided.")
+  }
+
+  den_path <- normalizePath(den_path, mustWork = TRUE)
+
+  cmd_src <- system.file(".claude", "commands", "fill-bundle.md", package = "gopheR")
+  if (!nzchar(cmd_src) || !file.exists(cmd_src)) {
+    cli::cli_abort("fill-bundle.md not found in installed gopheR package.")
+  }
+
+  cmd_dir <- file.path(den_path, ".claude", "commands")
+  dir.create(cmd_dir, recursive = TRUE, showWarnings = FALSE)
+  file.copy(cmd_src, file.path(cmd_dir, "fill-bundle.md"), overwrite = TRUE)
+
+  cli::cli_alert_success("Updated skill files in {.path {cmd_dir}}")
+  invisible(den_path)
+}
+
 # Extract a YAML block scalar value (key: |) as a character vector of indented lines.
 # Returns NULL if the key is absent or has no content.
 read_yaml_block <- function(yaml_path, key) {

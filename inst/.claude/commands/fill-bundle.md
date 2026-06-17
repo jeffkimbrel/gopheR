@@ -10,7 +10,7 @@ You are an agent that builds gopheR Excel bundles from a folder of bioinformatic
 **Your stance:** propose-then-confirm. Scan what is available, make your best inference, show it to the user, and ask for corrections — don't ask for everything upfront.
 
 A good opening message:
-> "I can see 5 paired-end FASTQ pairs named `ARW_S01_R1.fastq.gz` … `ARW_S05_R2.fastq.gz`. My guess: `readset` objects `ARW_S01`–`ARW_S05`, subtype `paired_end`. Does that look right, or should I adjust the IDs or type?"
+> "I can see 5 FASTQ pairs named `ARW_S01_R1.fastq.gz` … `ARW_S05_R2.fastq.gz`. My guess: `readset` objects `ARW_S01`–`ARW_S05`, subtype `shotgun`. Does that look right, or should I adjust the IDs or subtype?"
 
 You do **not** ingest bundles. You produce an Excel file, run a dry-run validation, and hand off to the user to run `read_bundle()` for real.
 
@@ -170,7 +170,7 @@ Everything else references these. Do this first.
 
 **Important: object type + subtype encoding**
 
-The bundle's `object` sheet has a single `object_type` column — there is **no separate `object_subtype` column**. Type and subtype are encoded together as `type:subtype` (e.g. `genome:MAG`, `readset:paired_end`, `assembly:metagenome`). `read_bundle()` splits on `:` at ingestion. Always write the combined form in your R script.
+The bundle's `object` sheet has a single `object_type` column — there is **no separate `object_subtype` column**. Type and subtype are encoded together as `type:subtype` (e.g. `genome:MAG`, `readset:shotgun`, `assembly:metagenome`). `read_bundle()` splits on `:` at ingestion. Always write the combined form in your R script.
 
 **After calling `write_bundle()`, read the `spec` sheet from the generated Excel file to get the exact valid `type:subtype` strings for this project before writing any object rows:**
 
@@ -182,8 +182,9 @@ print(spec_df)
 The `spec` sheet lists every valid combination (e.g. `genome:MAG`, `sample:water`, `site:raceway`). Copy these strings exactly — do not invent or guess. Objects with no subtype use the bare type name (e.g. `study`).
 
 **Infer from files:**
-- FASTQ pairs (`*_R1*` / `*_R2*`) → `readset:paired_end`; ID from filename stem before `_R1`/`_R2`
-- Single-end, nanopore, PacBio: infer subtype from naming or ask
+- FASTQ pairs (`*_R1*` / `*_R2*`) → `readset:shotgun`; ID from filename stem before `_R1`/`_R2`
+- Single-end or long-read: subtype is still `shotgun` (technology goes in `object_result`, not subtype); ask if unclear
+- Amplicon FASTQs (16S, ITS, etc.) → `readset:{primer_set_id}` (e.g. `readset:V4`, `readset:ITS2`); confirm primer region with user
 - Assembly FASTAs in an output folder → `assembly:metagenome`; ID from folder or filename stem
 - MAG/bin FASTAs in `bins/` or `MAGs/` → `genome:MAG`; ID from filename stem using the project convention
 - Tool output directories (SPAdes, MEGAHIT, MetaWRAP) → note for `workflow_file` in Stage 3; use directory metadata as `workflow_id` hint
@@ -204,8 +205,8 @@ WORKFLOWS:
   megahit_ARW1_2025-03  MEGAHIT coassembly (v1.2.9, default params)  2025-03-10  jdoe
 
 OBJECTS:
-  ARW_S01  readset  paired_end  "ARW sample 1"
-  ARW_S02  readset  paired_end  "ARW sample 2"
+  ARW_S01  readset  shotgun  "ARW sample 1"
+  ARW_S02  readset  shotgun  "ARW sample 2"
   mARW1_001  genome  MAG  "ARW1 bin 001"
   ...
 ```
@@ -414,7 +415,7 @@ If GopherScout (or any other process) appears in the output, tell the user to cl
 Stage {N} ingested: {date}
   People:    {n} added
   Workflows: {n} added
-  Objects:   {n} added ({type breakdown e.g. "3 genome:MAG, 2 readset:paired_end"})
+  Objects:   {n} added ({type breakdown e.g. "3 genome:MAG, 2 readset:shotgun"})
   Edges:     {n} added  (Stage 2+)
   Results:   {n} added  (Stage 3+)
   Files:     {n} added  (Stage 3+)
@@ -473,6 +474,84 @@ EOF
 - Anything that is clearly a mistake in the bundle data
 
 When in doubt: if gopheR printed a clean, human-readable error message, it's a data problem. If R threw an exception with a traceback, it's a bug.
+
+---
+
+## Amplicon bundles (asv_batch)
+
+Amplicon data (16S, ITS2, etc.) requires an `asv_batch` object in addition to readsets. Use this section when the user has DADA2 or similar amplicon output to ingest.
+
+**Before building an amplicon bundle, confirm:**
+1. The `primer_set` table has a row for this amplicon region — query it:
+   ```bash
+   sqlite3 <database_path> "SELECT primer_set_id, marker, region FROM primer_set;"
+   ```
+   If the primer_set is missing, the user must add it before the bundle can be ingested (see `amplicon_starter.R`).
+2. The `primer_set_id` must match the `asv_batch` subtype and the `readset` subtype (e.g. all three are `V4`).
+
+**Object sheet additions:**
+- One `asv_batch:{primer_set_id}` object (e.g. `asv_batch:V4`) — the batch of ASVs produced by this DADA2 run
+- Readsets already in the DB may not need re-adding; check first with `sqlite3`
+
+**Edge sheet additions:**
+- `readset derived_from asv_batch` — one row per readset that contributed to this batch
+  ```
+  child_id=readset_id  parent_id=asv_batch_id  edge_type=derived_from  workflow_id=dada2_workflow_id
+  ```
+
+**Workflow sheet:**
+- One workflow for the DADA2 run; ID convention: `dada2_{primer_set}_{site}_{YYYY-MM}` (e.g. `dada2_V4_ARW_2025-06`)
+
+**object_file sheet:**
+- `asv_batch_id | asv_fasta | /path/to/filtered_asvs.fasta | fasta | (workflow_id blank) | (checksum)`
+
+**workflow_file sheet:**
+- `dada2_workflow_id | abundance_matrix_raw | /path/to/seqtab_nochim.tsv | tsv | (checksum)`
+- `dada2_workflow_id | abundance_matrix     | /path/to/filtered_counts.tsv | tsv | (checksum)`
+
+**object_result sheet:**
+- `asv_batch_id | dada2_workflow_id | total_asvs       | {N}   | (blank)`
+- `asv_batch_id | dada2_workflow_id | filtered_asvs    | {N}   | (blank)`
+- `asv_batch_id | dada2_workflow_id | filter_threshold | {str} | (blank)` (e.g. `2x2`, `5x5`)
+- `asv_batch_id | dada2_workflow_id | median_depth     | {N}   | (blank)` (optional)
+
+**After Stage 1–3 are ingested, generate the `read_amplicon()` call:**
+
+Inspect the filtered count table to map sample column names to readset object IDs:
+
+```r
+counts <- read.table("/path/to/filtered_counts.tsv", header = TRUE, sep = "\t", row.names = 1)
+head(names(counts))  # show column names
+```
+
+Query existing readset IDs:
+```bash
+sqlite3 <database_path> "SELECT object_id FROM object WHERE object_type='readset';"
+```
+
+If column names don't match readset IDs exactly, build a `sample_map`. Present it to the user for confirmation:
+
+```
+SAMPLE MAP (local column → readset object_id):
+  S01 → ARW_S01_reads
+  S02 → ARW_S02_reads
+  ...
+```
+
+Then produce the confirmed call:
+
+```r
+gopheR::read_amplicon(
+  count_table  = "/path/to/filtered_counts.tsv",
+  fasta_path   = "/path/to/filtered_asvs.fasta",
+  asv_batch_id = "{asv_batch_id}",
+  workflow_id  = "{dada2_workflow_id}",
+  sample_map   = c(S01 = "ARW_S01_reads", S02 = "ARW_S02_reads", ...),  # or NULL if names match
+  validate_only = TRUE   # user flips to FALSE after reviewing output
+)
+```
+
+Hand this to the user — do not run `read_amplicon()` yourself.
 
 ---
 

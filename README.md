@@ -125,7 +125,7 @@ See [DETAILS.md](DETAILS.md) for:
 - Full validation pipeline
 - Working with dens
 - Key functions reference
-- Planned / future ideas
+- Design decisions and conventions
 
 See [EXAMPLES.md](EXAMPLES.md) for:
 - MetaWRAP coassembly → binning → quality filtering (how many workflows, where quality lives, what to do with intermediate bins)

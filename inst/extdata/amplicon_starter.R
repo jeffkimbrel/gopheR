@@ -15,9 +15,10 @@ library(DBI)
 use_db("/path/to/your/project.den")
 
 # =============================================================================
-# STEP 1: Migrate existing den (skip for new dens created with 0.6.0.9000)
+# STEP 1: Migrate an existing den (SKIP THIS if den was created with gopheR
+# 0.6.1 or later -- the schema is already up to date)
 # =============================================================================
-source(system.file("extdata", "migrate_amplicon.R", package = "gopheR"))
+# source(system.file("extdata", "migrate_amplicon.R", package = "gopheR"))
 
 # =============================================================================
 # STEP 2: Populate primer_set (required before any ASVs can be inserted)
