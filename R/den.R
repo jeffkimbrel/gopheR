@@ -69,7 +69,7 @@ initialize_den <- function(path, name, create_examples = FALSE, template_den = N
   dirs <- c(
     den_path,
     file.path(den_path, "archive", "dens"),
-    file.path(den_path, "archive", "bundles"),
+    file.path(den_path, "archive", "changes"),
     file.path(den_path, "archive", "agent"),
     file.path(den_path, "archive", "clustering")
   )
@@ -220,6 +220,46 @@ update_den_skills <- function(den_path = NULL) {
 
   cli::cli_alert_success("Updated skill files in {.path {cmd_dir}}")
   invisible(den_path)
+}
+
+#' Archive a direct-SQL R script to the den changes log
+#'
+#' Copies an R script that made direct database changes (schema migrations,
+#' `DBI::dbExecute()` calls, `read_amplicon()`, etc.) into `archive/changes/`
+#' with a timestamp prefix. This keeps the changes log complete so the database
+#' can be rebuilt by replaying all files in `archive/changes/` in order.
+#'
+#' Call this immediately after a script has been confirmed to succeed.
+#'
+#' @param script_path Character. Path to the R script to archive.
+#' @param den_path Character. Path to the den directory. Defaults to
+#'   `find_den_root()`.
+#'
+#' @returns Invisibly returns the path to the archived file.
+#' @export
+
+archive_change <- function(script_path, den_path = NULL) {
+  if (!file.exists(script_path)) {
+    cli::cli_abort("Script not found: {.path {script_path}}")
+  }
+
+  if (is.null(den_path)) {
+    den_path <- find_den_root()
+    if (is.null(den_path)) cli::cli_abort("Not inside a den and no den_path provided.")
+  }
+  den_path <- normalizePath(den_path, mustWork = TRUE)
+
+  archive_dir <- file.path(den_path, "archive", "changes")
+  dir.create(archive_dir, recursive = TRUE, showWarnings = FALSE)
+
+  ts   <- format(Sys.time(), "%Y%m%dT%H%M%S")
+  dest <- file.path(archive_dir, paste0(ts, "_", basename(script_path)))
+
+  ok <- file.copy(script_path, dest)
+  if (!ok) cli::cli_abort("Could not copy script to {.path {archive_dir}}")
+
+  cli::cli_alert_success("Change archived: {.path {dest}}")
+  invisible(dest)
 }
 
 # Extract a YAML block scalar value (key: |) as a character vector of indented lines.

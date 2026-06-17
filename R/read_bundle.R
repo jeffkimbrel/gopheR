@@ -364,19 +364,13 @@ read_bundle <- function(bundle_path,
   if (!isTRUE(validate_only)) {
     den_root <- find_den_root(dirname(db_path))
     if (!is.null(den_root)) {
-      archive_dir <- file.path(den_root, "archive", "bundles")
-      dir.create(archive_dir, recursive = TRUE, showWarnings = FALSE)
-      ts        <- format(Sys.time(), "%Y%m%dT%H%M%S")
-      stem      <- sub("\\.[^.]+$", "", basename(bundle_path))
-      ext       <- regmatches(bundle_path, regexpr("\\.[^.]+$", bundle_path))
-      archive_name <- paste0(stem, ".ingested.", ts, ext)
-      bundle_archive_path <- file.path(archive_dir, archive_name)
-      ok <- file.copy(bundle_path, bundle_archive_path)
-      if (ok) {
-        cli::cli_alert_success("Bundle archived: {.path {bundle_archive_path}}")
-      } else {
-        cli::cli_alert_warning("Could not archive bundle to {.path {archive_dir}}")
-      }
+      bundle_archive_path <- tryCatch(
+        archive_change(bundle_path, den_path = den_root),
+        error = function(e) {
+          cli::cli_alert_warning("Could not archive bundle: {conditionMessage(e)}")
+          NULL
+        }
+      )
     }
   }
 
