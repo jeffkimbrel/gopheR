@@ -291,6 +291,28 @@ PacBio 16S and Illumina 16S both produce `readset:16S_V4` — they belong in the
 
 ---
 
+## Schema redesign needed
+
+**Status:** The amplicon schema was designed before gopheR/GopherScout reached their current form. A full redesign session is warranted before adding more structure. Key issues to resolve:
+
+### Sub-batches (Illumina run level)
+
+DADA2 requires a per-run error model, so samples from different Illumina runs must be processed separately then merged. The current schema has no way to capture this intermediate level.
+
+**Design requirement:** Sub-batches must be optional. The common case (all samples on one run, or user doesn't care) should work exactly as today — one `asv_batch`, no sub-batch objects needed. Sub-batches only appear when explicitly created.
+
+**The collapsed FASTQ problem:** Some sequencing centers, when they don't hit a guaranteed minimum read depth, collapse multiple Illumina runs into a single FASTQ file. This means a single readset may contain reads from multiple flowcells with different error profiles — a DADA2 error model violation that is silent unless you check the read headers. A per-read header parsing workflow exists for detecting this. The schema needs to accommodate a many-to-many relationship between readsets and Illumina runs (not just one-to-one).
+
+**Proposed direction:** An optional intermediate object type (e.g. `sequencing_run`) between readset and `asv_batch`. Readsets link to sequencing runs; `asv_batch` derives from sequencing runs. If only one run, this layer is transparent. The header-parsing workflow attaches run metadata (flowcell ID, instrument, lane) as `object_result` on `sequencing_run`.
+
+### Other open redesign questions
+
+- Should abundance matrices, taxonomy outputs, and phylogenetic trees be first-class objects (with their own detail panels and graph presence) rather than workflow_files?
+- GopherScout integration: `asv_batch` already appears as a first-class object; what additional amplicon data surfaces in the detail panel vs. stays in R?
+- Full schema review against the current object/edge/result model before implementing anything new.
+
+---
+
 ## Open questions
 
 - `cluster_type_spec` table vs. free text: free text is probably fine given the small number of real-world values (`cluster97`, `cluster99`). Defer until there's a reason to constrain.
