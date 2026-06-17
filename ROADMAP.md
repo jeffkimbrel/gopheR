@@ -97,19 +97,19 @@ Deferred until Phase 1–3 has been validated on real data.
 
 ---
 
-### fill-bundle amplicon extension
+## GopherScout — UI / Features
 
-Extend `inst/.claude/commands/fill-bundle.md` with:
-- `asv_batch` object type and subtypes (V4, V3-V4, ITS2, 18S, WANDA)
-- Expected edges: `readset derived_from asv_batch`
-- Expected `object_file` roles: `asv_fasta`
-- Expected `workflow_file` roles: `abundance_matrix`, `abundance_matrix_raw`, `phylogenetic_tree`
-- `object_result` keys for `asv_batch`: `total_asvs`, `filtered_asvs`, `filter_threshold`, `median_depth`
-- Stage 3 output: generate confirmed `read_amplicon()` call with `sample_map` filled in
+### Amplicon browsing
+
+`asv_batch` objects already appear in the Objects tab and graph (first-class objects). What's missing is visibility into the amplicon-specific tables (`asv`, `amplicon_asv`, `asv_taxonomy`):
+
+- **ASV count** on `asv_batch` detail panel — query `amplicon_asv` for count of ASVs in this batch
+- **Taxonomy summary** — top taxa from `asv_taxonomy` for a given `asv_batch`, grouped by rank
+- **Cross-batch ASV overlap** — shared global `asv_id`s between two `asv_batch` objects
+
+Scope and design TBD; deferred until the R amplicon layer is stable across multiple datasets.
 
 ---
-
-## GopherScout — UI / Features
 
 ### Context menu / "send to" pattern
 

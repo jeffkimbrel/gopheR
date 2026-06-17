@@ -1,18 +1,19 @@
 # Amplicon / ASV Schema Planning
 
-**Status:** Phases 1-3 implemented in gopheR 0.6.0.9000 — awaiting real-data validation
+**Status:** Implemented and real-data validated in gopheR 0.8.0 (V4 16S + 18S, ARW den, 2026-06-17)
 
 ---
 
 ## Current tables
 
-Four tables exist in the `.den` schema but are not yet wired into the main gopheR workflow:
+Five tables exist in the `.den` schema, all wired into the gopheR workflow:
 
 | Table | Purpose |
 |---|---|
-| `primer_set` | Reference table of primer pairs (marker, region, sequences, names) |
+| `primer_set` | Reference table of primer pairs (`primer_set_id` is TEXT, e.g. `"V4"`) |
 | `asv` | Global sequence dictionary — each unique amplicon sequence gets one row |
 | `amplicon_asv` | Per-project mapping of local ASV labels → global `asv_id` |
+| `asv_taxonomy` | Taxonomy assignments per ASV per classifier workflow |
 | `asv_cluster` | Cross-study OTU clustering — maps `asv_id` → `cluster_id` at a given threshold |
 
 ---
