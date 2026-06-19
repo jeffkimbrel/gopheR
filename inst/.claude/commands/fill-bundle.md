@@ -238,7 +238,7 @@ sqlite3 <database_path> "SELECT object_id, object_type FROM object ORDER BY obje
 │ Semantic: "child IS edge_type OF parent"                     │
 │                                                              │
 │ Examples:                                                    │
-│   readset   derived_from    sample     (readset of sample)   │
+│   readset   sequenced_from  sample     (readset of sample)   │
 │   assembly  assembled_from  readset    (assembly of readset) │
 │   genome    binned_from     assembly   (genome of assembly)  │
 │   non-rep   dereplicated_into  rep     (non-rep of rep)      │
@@ -254,8 +254,8 @@ sqlite3 <database_path> "SELECT object_id, object_type FROM object ORDER BY obje
 
 ```
 EDGES:
-  ARW_S01  derived_from  SAMPLE_01   workflow: sequencing_run1
-  ARW_S02  derived_from  SAMPLE_02   workflow: sequencing_run1
+  ARW_S01  sequenced_from  SAMPLE_01   workflow: sequencing_run1
+  ARW_S02  sequenced_from  SAMPLE_02   workflow: sequencing_run1
   mARW1_001  binned_from  ARW1_assembly  workflow: metawrap_binning_2025-03
   ...
 ```
@@ -280,10 +280,36 @@ Run after Stage 1 is ingested (objects and workflows must exist).
 | Tool output | Key(s) | Workflow to create if missing |
 |---|---|---|
 | CheckM2 `quality_report.tsv` | `completeness`, `contamination` | `checkm2_{site}_{YYYY-MM}` |
-| QUAST `report.tsv` | `total_length`, `N50`, `n_contigs`, `gc_content` | `quast_{site}_{YYYY-MM}` |
+| QUAST `report.tsv` | `total_length`, `n_contigs`, `N50`, `L50`, `gc_content` | `quast_{site}_{YYYY-MM}` |
+| BBTools `stats.sh` | `total_length`, `n_contigs` — **see N50/L50 warning below** | `bbtools_stats_{site}_{YYYY-MM}` |
 | seqkit stats | `total_length`, `n_contigs`, `mean_read_length` | `seqkit_{site}_{YYYY-MM}` |
 | GTDB-Tk `*.summary.tsv` | `GTDB_taxonomy` | `gtdbtk_{site}_{YYYY-MM}` |
 | Coverage TSV | `mean_coverage`, `breadth` | workflow that produced the coverage |
+
+```
+┌─ N50 / L50 — ALWAYS ASK THE SOURCE BEFORE ENTERING ─────────────────────────┐
+│ gopheR uses the STANDARD bioinformatics convention:                          │
+│                                                                              │
+│   N50 = LENGTH (bp) of the shortest contig in the set of longest contigs    │
+│          that together cover ≥50% of total assembly length                  │
+│   L50 = COUNT of contigs in that set (no unit)                              │
+│                                                                              │
+│ QUAST uses this same convention — map directly:                              │
+│   QUAST "N50"  → gopheR N50  (length, bp)                                   │
+│   QUAST "L50"  → gopheR L50  (count)                                        │
+│                                                                              │
+│ BBTools stats.sh uses the OPPOSITE naming. Its "N/L50: 40/30.914 KB" means: │
+│   BBTools N = 40        → gopheR L50  (count — map to L50, not N50)         │
+│   BBTools L = 30.914 KB → gopheR N50  (length — map to N50, not L50)        │
+│                                                                              │
+│ RULE: If the user provides N50/L50 values, ask which tool produced them     │
+│ before entering anything. Confirm by sanity-checking:                        │
+│   • L50 (count) must be ≤ n_contigs                                         │
+│   • N50 (length) must be ≤ total_length                                     │
+│   • A fractional value (e.g. 30.914) can only be a length in KB —           │
+│     contig counts are always whole numbers; convert KB → bp before storing  │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
 
 Always show the column-to-key mapping before writing result rows. Tool column names rarely match gopheR key names exactly.
 
