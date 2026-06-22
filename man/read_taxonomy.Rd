@@ -7,7 +7,7 @@
 read_taxonomy(
   taxonomy_table,
   workflow_id,
-  asv_batch_id = NULL,
+  amplicon_id = NULL,
   validate_only = FALSE,
   db_path = NULL
 )
@@ -20,8 +20,8 @@ string. Additional columns (e.g. confidence) are ignored.}
 \item{workflow_id}{Workflow ID for this classification run. Must already
 exist in the \code{workflow} table.}
 
-\item{asv_batch_id}{If provided, column 1 contains local ASV labels scoped
-to this batch; they are mapped to global asv_ids via \code{amplicon_asv}. If
+\item{amplicon_id}{If provided, column 1 contains local ASV labels scoped
+to this amplicon object; they are mapped to global asv_ids via \code{amplicon_asv}. If
 \code{NULL}, column 1 must already be asv_ids (MD5 hashes).}
 
 \item{validate_only}{Logical. If \code{TRUE}, validate inputs without writing.}

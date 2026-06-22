@@ -10,7 +10,7 @@
 #'   with read counts. If `fasta_path` is `NULL`, column 2 must contain DNA
 #'   sequences (they are used for `asv_id` computation and then dropped from
 #'   the count data).
-#' @param asv_batch_id Object ID of the existing `asv_batch` object for this
+#' @param amplicon_id Object ID of the existing `amplicon` object for this
 #'   round of ASV generation. The object's subtype is used as `primer_set_id`.
 #' @param workflow_id Workflow ID of the DADA2 workflow that produced this data.
 #'   Must already exist in the `workflow` table.
@@ -29,7 +29,7 @@
 #'   (ASVs already in `asv` table), `n_labels` (rows written to `amplicon_asv`).
 #' @export
 read_amplicon <- function(count_table,
-                          asv_batch_id,
+                          amplicon_id,
                           workflow_id,
                           fasta_path = NULL,
                           sample_map = NULL,
@@ -113,7 +113,7 @@ read_amplicon <- function(count_table,
     cli::cli_alert_warning("{n_raw - n_unique} duplicate sequence(s) detected -- duplicates share one asv_id.")
   }
 
-  cli::cli_alert_info("count_table: {n_raw} ASV label(s), {length(sample_cols)} sample(s), primer_set resolved from asv_batch")
+  cli::cli_alert_info("count_table: {n_raw} ASV label(s), {length(sample_cols)} sample(s), primer_set resolved from amplicon")
 
   # --- 5. Validate and insert ---
   if (!validate_only) {
@@ -123,12 +123,12 @@ read_amplicon <- function(count_table,
   result <- with_gopher_con(
     .f = function(con) {
 
-      # Validate asv_batch
+      # Validate amplicon object
       batch_row <- DBI::dbGetQuery(con,
-        "SELECT object_id, object_subtype FROM object WHERE object_id = ? AND object_type = 'asv_batch'",
-        params = list(asv_batch_id))
+        "SELECT object_id, object_subtype FROM object WHERE object_id = ? AND object_type = 'amplicon'",
+        params = list(amplicon_id))
       if (nrow(batch_row) == 0) {
-        cli::cli_abort("asv_batch_id {.val {asv_batch_id}} not found or is not of type asv_batch.")
+        cli::cli_abort("amplicon_id {.val {amplicon_id}} not found or is not of type amplicon.")
       }
       primer_set_id <- batch_row$object_subtype[1]
 
@@ -202,7 +202,7 @@ read_amplicon <- function(count_table,
         for (i in seq_along(asv_labels)) {
           DBI::dbExecute(con,
             "INSERT OR IGNORE INTO amplicon_asv (amplicon_object_id, asv_label, asv_id) VALUES (?, ?, ?)",
-            params = list(asv_batch_id, asv_labels[i], asv_ids[i]))
+            params = list(amplicon_id, asv_labels[i], asv_ids[i]))
         }
 
         # Register count table in workflow_file
@@ -275,8 +275,8 @@ read_amplicon <- function(count_table,
 #'   string. Additional columns (e.g. confidence) are ignored.
 #' @param workflow_id Workflow ID for this classification run. Must already
 #'   exist in the `workflow` table.
-#' @param asv_batch_id If provided, column 1 contains local ASV labels scoped
-#'   to this batch; they are mapped to global asv_ids via `amplicon_asv`. If
+#' @param amplicon_id If provided, column 1 contains local ASV labels scoped
+#'   to this amplicon object; they are mapped to global asv_ids via `amplicon_asv`. If
 #'   `NULL`, column 1 must already be asv_ids (MD5 hashes).
 #' @param validate_only Logical. If `TRUE`, validate inputs without writing.
 #' @param db_path Path to the `.den` database. Defaults to the active database.
@@ -285,7 +285,7 @@ read_amplicon <- function(count_table,
 #' @export
 read_taxonomy <- function(taxonomy_table,
                           workflow_id,
-                          asv_batch_id = NULL,
+                          amplicon_id = NULL,
                           validate_only = FALSE,
                           db_path = NULL) {
 
@@ -322,12 +322,12 @@ read_taxonomy <- function(taxonomy_table,
 
       # Resolve local labels -> asv_ids if needed
       asv_ids <- raw_ids
-      if (!is.null(asv_batch_id)) {
+      if (!is.null(amplicon_id)) {
         mapping <- DBI::dbGetQuery(con,
           "SELECT asv_label, asv_id FROM amplicon_asv WHERE amplicon_object_id = ?",
-          params = list(asv_batch_id))
+          params = list(amplicon_id))
         if (nrow(mapping) == 0) {
-          cli::cli_abort("No amplicon_asv entries for asv_batch_id {.val {asv_batch_id}}.")
+          cli::cli_abort("No amplicon_asv entries for amplicon_id {.val {amplicon_id}}.")
         }
         lut     <- stats::setNames(mapping$asv_id, mapping$asv_label)
         asv_ids <- unname(lut[raw_ids])
@@ -403,8 +403,8 @@ read_taxonomy <- function(taxonomy_table,
 #'   Used to scope `trim_clustering()`.
 #' @param format `"uc"` (VSEARCH UC output, default) or `"tsv"` (two-column:
 #'   asv_id, cluster_id -- no representative information).
-#' @param asv_batch_id If provided, IDs in the file are local ASV labels from
-#'   this batch; they are mapped to asv_ids via `amplicon_asv`.
+#' @param amplicon_id If provided, IDs in the file are local ASV labels from
+#'   this amplicon object; they are mapped to asv_ids via `amplicon_asv`.
 #' @param trim Logical. If `TRUE` (default), call `trim_clustering()` after
 #'   inserting to archive older runs for this primer set + cluster type.
 #' @param validate_only Logical.
@@ -417,7 +417,7 @@ read_clustering <- function(clustering_output,
                             cluster_type,
                             primer_set_id,
                             format = c("uc", "tsv"),
-                            asv_batch_id = NULL,
+                            amplicon_id = NULL,
                             trim = TRUE,
                             validate_only = FALSE,
                             db_path = NULL) {
@@ -464,10 +464,10 @@ read_clustering <- function(clustering_output,
       if (wf_n == 0L) cli::cli_abort("workflow_id {.val {workflow_id}} not found.")
 
       # Resolve local labels if needed
-      if (!is.null(asv_batch_id)) {
+      if (!is.null(amplicon_id)) {
         mapping <- DBI::dbGetQuery(con,
           "SELECT asv_label, asv_id FROM amplicon_asv WHERE amplicon_object_id = ?",
-          params = list(asv_batch_id))
+          params = list(amplicon_id))
         lut <- stats::setNames(mapping$asv_id, mapping$asv_label)
         cluster_df$asv_id     <<- unname(lut[cluster_df$asv_id])
         cluster_df$cluster_id <<- unname(lut[cluster_df$cluster_id])

@@ -10,7 +10,7 @@ read_clustering(
   cluster_type,
   primer_set_id,
   format = c("uc", "tsv"),
-  asv_batch_id = NULL,
+  amplicon_id = NULL,
   trim = TRUE,
   validate_only = FALSE,
   db_path = NULL
@@ -30,8 +30,8 @@ Used to scope \code{trim_clustering()}.}
 \item{format}{\code{"uc"} (VSEARCH UC output, default) or \code{"tsv"} (two-column:
 asv_id, cluster_id -- no representative information).}
 
-\item{asv_batch_id}{If provided, IDs in the file are local ASV labels from
-this batch; they are mapped to asv_ids via \code{amplicon_asv}.}
+\item{amplicon_id}{If provided, IDs in the file are local ASV labels from
+this amplicon object; they are mapped to asv_ids via \code{amplicon_asv}.}
 
 \item{trim}{Logical. If \code{TRUE} (default), call \code{trim_clustering()} after
 inserting to archive older runs for this primer set + cluster type.}

@@ -7,6 +7,14 @@ Amplicon-specific items that aren't yet implemented also live here alongside the
 
 ## gopheR — Data / Schema
 
+### Wildcard object type for universal spec entries
+
+Some result keys (`note`) and file roles (`general`) apply to every object type. Currently each must be inserted per-type in `object_result_spec` and `object_file_type_spec`, and must be repeated whenever a new object type is added.
+
+**Proposed:** add `object_type = '*'` as a reserved row in the `object_type` table. Validation logic checks the specific type AND `*`. FK still holds; no second table needed. GopherScout type dropdowns would need to filter out `*`.
+
+---
+
 ### `consolidate_files()`
 
 Move or copy files from scattered locations into a single organized directory, verify checksums, and update the database with new paths.
@@ -78,11 +86,11 @@ Handles ID mapping, edge inference, and bulk row generation.
 
 ### `merge_abundances(primer_set_id, cluster_type, workflow_id = NULL)`
 
-Deferred until Phase 1–3 has been validated on real data.
+Deferred until core amplicon ingest has been validated on real data. (Core validated 2026-06-17; this function is next.)
 
 **What it does:**
-1. Find all `asv_batch` objects with `object_subtype == primer_set_id`
-2. For each batch, locate its abundance matrix TSV via `workflow_file(file_role = "abundance_matrix")`
+1. Find all `amplicon` objects with `object_subtype == primer_set_id`
+2. For each amplicon, locate its abundance matrix TSV via `object_file(file_role = "abundance_matrix")`
 3. Read each TSV; remap local ASV labels → `asv_id` via `amplicon_asv`
 4. Join `asv_id` → `cluster_id` via `asv_cluster` for the given `cluster_type` (most recent workflow if `workflow_id = NULL`)
 5. Sum abundance across ASVs that collapsed into the same cluster
@@ -97,19 +105,19 @@ Deferred until Phase 1–3 has been validated on real data.
 
 ---
 
-### fill-bundle amplicon extension
+## GopherScout — UI / Features
 
-Extend `inst/.claude/commands/fill-bundle.md` with:
-- `asv_batch` object type and subtypes (V4, V3-V4, ITS2, 18S, WANDA)
-- Expected edges: `readset derived_from asv_batch`
-- Expected `object_file` roles: `asv_fasta`
-- Expected `workflow_file` roles: `abundance_matrix`, `abundance_matrix_raw`, `phylogenetic_tree`
-- `object_result` keys for `asv_batch`: `total_asvs`, `filtered_asvs`, `filter_threshold`, `median_depth`
-- Stage 3 output: generate confirmed `read_amplicon()` call with `sample_map` filled in
+### Amplicon browsing
+
+`amplicon` objects appear in the Objects tab and graph as first-class objects. What's missing is visibility into the amplicon-specific tables (`asv`, `amplicon_asv`, `asv_taxonomy`):
+
+- **ASV count** on `amplicon` detail panel — query `amplicon_asv` for count of ASVs in this amplicon
+- **Taxonomy summary** — top taxa from `asv_taxonomy` for a given `amplicon`, grouped by rank
+- **Cross-amplicon ASV overlap** — shared global `asv_id`s between two `amplicon` objects
+
+Scope and design TBD; deferred until the R amplicon layer is stable across multiple datasets.
 
 ---
-
-## GopherScout — UI / Features
 
 ### Context menu / "send to" pattern
 
