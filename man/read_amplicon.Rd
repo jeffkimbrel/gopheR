@@ -6,7 +6,7 @@
 \usage{
 read_amplicon(
   count_table,
-  asv_batch_id,
+  amplicon_id,
   workflow_id,
   fasta_path = NULL,
   sample_map = NULL,
@@ -21,7 +21,7 @@ with read counts. If \code{fasta_path} is \code{NULL}, column 2 must contain DNA
 sequences (they are used for \code{asv_id} computation and then dropped from
 the count data).}
 
-\item{asv_batch_id}{Object ID of the existing \code{asv_batch} object for this
+\item{amplicon_id}{Object ID of the existing \code{amplicon} object for this
 round of ASV generation. The object's subtype is used as \code{primer_set_id}.}
 
 \item{workflow_id}{Workflow ID of the DADA2 workflow that produced this data.

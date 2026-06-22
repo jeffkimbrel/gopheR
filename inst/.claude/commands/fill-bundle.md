@@ -442,8 +442,8 @@ Empty strings `""` cause FOREIGN KEY constraint errors during ingestion:
 ```r
 edges_df <- data.frame(
   parent_id  = readset_ids,
-  child_id   = asv_batch_ids,
-  edge_type  = "derived_from",
+  child_id   = amplicon_ids,
+  edge_type  = "inferred_from",
   workflow_id = NA_character_,   # NOT ""
   stringsAsFactors = FALSE
 )
@@ -568,11 +568,11 @@ When in doubt: if gopheR printed a clean, human-readable error message, it's a d
 
 ---
 
-## Amplicon bundles (asv_batch)
+## Amplicon bundles
 
-Amplicon data (16S, ITS2, etc.) requires an `asv_batch` object in addition to readsets. Use this section when the user has DADA2 or similar amplicon output to ingest.
+Amplicon data (16S, ITS2, etc.) requires an `amplicon` object in addition to readsets. Use this section when the user has DADA2 or similar output to ingest.
 
-### Primer Set Table Schema
+### Primer set table
 
 `primer_set_id` is a **TEXT PRIMARY KEY** — it is the region string (e.g. `"V4"`, `"ITS2"`), not an integer. Always specify it explicitly when inserting:
 
@@ -583,44 +583,42 @@ DBI::dbExecute(con, "
 ")
 ```
 
-The `primer_set_id`, `asv_batch` subtype, and `readset` subtype must all use the same string (e.g. all three are `"V4"`). `read_amplicon()` reads `primer_set_id` directly from the `asv_batch` object's subtype and uses it when inserting into the `asv` table — if `primer_set` doesn't have a row with that exact TEXT key, you get a foreign key error.
-
-> **Older dens (pre-0.6.0)** may have `primer_set_id INTEGER AUTOINCREMENT` instead. If `read_amplicon()` fails with "FOREIGN KEY constraint failed" after validation passes, check the schema: `PRAGMA table_info(primer_set)`. If it shows INTEGER, see `primer_set_fix.md` in the session folder for migration SQL.
+The `primer_set_id`, `amplicon` subtype, and `readset` subtype must all use the same string (e.g. all three are `"V4"`). `read_amplicon()` reads `primer_set_id` from the `amplicon` object's subtype — if `primer_set` doesn't have a matching TEXT row, you get a foreign key error.
 
 **Before building an amplicon bundle, confirm:**
-1. The `primer_set` table has a row for this amplicon region — query it:
+1. The `primer_set` table has a row for this region:
    ```bash
    sqlite3 <database_path> "SELECT primer_set_id, marker, region FROM primer_set;"
    ```
-   If the primer_set is missing, the user must add it before the bundle can be ingested (see `amplicon_starter.R`).
-2. The `primer_set_id` must match the `asv_batch` subtype and the `readset` subtype (e.g. all three are `V4`).
+   If missing, add it via direct SQL before ingesting the bundle.
+2. The `primer_set_id` must match the `amplicon` subtype AND the `readset` subtype (e.g. all three are `V4`).
 
-**Object sheet additions:**
-- One `asv_batch:{primer_set_id}` object (e.g. `asv_batch:V4`) — the batch of ASVs produced by this DADA2 run
-- Readsets already in the DB may not need re-adding; check first with `sqlite3`
+**Object sheet:**
+- One `amplicon:{primer_set_id}` object (e.g. `amplicon:V4`) — the ASV generation run for this primer set
+- Readsets already in the DB may not need re-adding; check first
 
-**Edge sheet additions:**
-- `asv_batch derived_from readset` — one row per readset that contributed to this batch
+**Edge sheet:**
+- `amplicon inferred_from readset` — one row per readset that contributed to this amplicon
   ```
-  parent_id=readset_id  child_id=asv_batch_id  edge_type=derived_from  workflow_id=dada2_workflow_id
+  parent_id=readset_id  child_id=amplicon_id  edge_type=inferred_from  workflow_id=dada2_workflow_id
   ```
-  Semantic: "asv_batch IS derived_from OF readset" (the batch was generated from the readset)
+  Semantic: "amplicon IS inferred_from OF readset" — NOT `derived_from`, which is reserved for sample→sample and readset→readset splits.
 
 **Workflow sheet:**
 - One workflow for the DADA2 run; ID convention: `dada2_{primer_set}_{site}_{YYYY-MM}` (e.g. `dada2_V4_ARW_2025-06`)
 
 **object_file sheet:**
-- `asv_batch_id | asv_fasta | /path/to/filtered_asvs.fasta | fasta | (workflow_id blank) | (checksum)`
+- `amplicon_id | asv_fasta | /path/to/filtered_asvs.fasta | fasta | (workflow_id) | (checksum)`
 
 **workflow_file sheet:**
 - `dada2_workflow_id | abundance_matrix_raw | /path/to/seqtab_nochim.tsv | tsv | (checksum)`
 - `dada2_workflow_id | abundance_matrix     | /path/to/filtered_counts.tsv | tsv | (checksum)`
 
 **object_result sheet:**
-- `asv_batch_id | dada2_workflow_id | total_asvs       | {N}   | (blank)`
-- `asv_batch_id | dada2_workflow_id | filtered_asvs    | {N}   | (blank)`
-- `asv_batch_id | dada2_workflow_id | filter_threshold | {str} | (blank)` (e.g. `2x2`, `5x5`)
-- `asv_batch_id | dada2_workflow_id | median_depth     | {N}   | (blank)` (optional)
+- `amplicon_id | dada2_workflow_id | total_asvs       | {N}   | (blank)`
+- `amplicon_id | dada2_workflow_id | filtered_asvs    | {N}   | (blank)`
+- `amplicon_id | dada2_workflow_id | filter_threshold | {str} | (blank)` (e.g. `2x2`, `5x5`)
+- `amplicon_id | dada2_workflow_id | median_depth     | {N}   | (blank)` (optional)
 
 **After Stage 1–3 are ingested, generate the `read_amplicon()` call:**
 
@@ -628,8 +626,7 @@ The `primer_set_id`, `asv_batch` subtype, and `readset` subtype must all use the
 
 ```r
 counts <- read.table("/path/to/filtered_counts.tsv", header = TRUE, sep = "\t", row.names = 1)
-count_cols <- names(counts)
-print(count_cols)  # e.g. "S01", "S02", "ARW1_20151027", etc.
+print(names(counts))  # e.g. "S01", "S02", "ARW1_20151027", etc.
 ```
 
 **Step 2** — Query existing readset IDs from the database:
@@ -637,16 +634,14 @@ print(count_cols)  # e.g. "S01", "S02", "ARW1_20151027", etc.
 ```r
 con <- gopheR::gopher_con()
 readset_ids <- DBI::dbGetQuery(con, "
-  SELECT object_id
-  FROM object
+  SELECT object_id FROM object
   WHERE object_type = 'readset' AND object_subtype = 'V4'
   ORDER BY object_id
 ")$object_id
-print(readset_ids)  # e.g. "ARW1_20151027_V4_reads", ...
 DBI::dbDisconnect(con)
 ```
 
-**Step 3** — If column names don't match readset IDs exactly, build a `sample_map`. Present it to the user for confirmation:
+**Step 3** — If column names don't match readset IDs, build a `sample_map`. Present it for confirmation:
 
 ```
 SAMPLE MAP (local column → readset object_id):
@@ -659,11 +654,11 @@ Then produce the confirmed call:
 
 ```r
 gopheR::read_amplicon(
-  count_table  = "/path/to/filtered_counts.tsv",
-  fasta_path   = "/path/to/filtered_asvs.fasta",
-  asv_batch_id = "{asv_batch_id}",
-  workflow_id  = "{dada2_workflow_id}",
-  sample_map   = c(S01 = "ARW_S01_reads", S02 = "ARW_S02_reads", ...),  # or NULL if names match
+  count_table   = "/path/to/filtered_counts.tsv",
+  fasta_path    = "/path/to/filtered_asvs.fasta",
+  amplicon_id   = "{amplicon_id}",
+  workflow_id   = "{dada2_workflow_id}",
+  sample_map    = c(S01 = "ARW_S01_reads", S02 = "ARW_S02_reads", ...),  # or NULL if names match
   validate_only = TRUE   # user flips to FALSE after reviewing output
 )
 ```
