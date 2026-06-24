@@ -399,6 +399,37 @@ write_bundle <- function(out_xlsx,
   )
 
 
+  # external_id sheet
+  external_id_cols <- c("object_id", "db_name", "accession_id")
+  allowed_db_names <- tryCatch(
+    DBI::dbGetQuery(gopher_con(db_path = db_path), "SELECT db_name FROM external_db ORDER BY db_name")$db_name,
+    error = function(e) character(0)
+  )
+
+  add_bundle_sheet(
+    wb = wb,
+    sheet = "external_id",
+    cols = external_id_cols,
+    header_style = header_style
+  )
+
+  if (length(allowed_db_names) > 0) {
+    add_spec_dropdown(
+      wb = wb,
+      target_sheet = "external_id",
+      target_cols = external_id_cols,
+      target_col_name = "db_name",
+      spec_values = allowed_db_names,
+      spec_name = "external_db_name",
+      enforce = TRUE
+    )
+  }
+
+  if (!is.null(object_id_spec_col) && "object_id" %in% external_id_cols) {
+    add_dropdown_from_spec(wb, sheet = "external_id", target_col = match("object_id", external_id_cols),
+      spec_col = object_id_spec_col, n_values = length(existing_object_ids), enforce = FALSE)
+  }
+
   # hide spec sheet
   # Set active sheet to first visible sheet (people if it exists, otherwise workflow)
   if (isTRUE(people_sheet)) {

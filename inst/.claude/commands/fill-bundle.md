@@ -343,6 +343,38 @@ Flag:
 
 After confirmation: generate bundle, validate, hand off.
 
+**External IDs — link objects to external databases:**
+
+Check the `external_db` table to see what databases are registered:
+
+```bash
+sqlite3 <database_path> "SELECT db_name, label FROM external_db ORDER BY db_name;"
+```
+
+Proactively ask for accession numbers when the object type suggests them:
+
+| Object type | Likely databases |
+|---|---|
+| `readset` | SRA (SRR/ERR/DRR accessions) |
+| `genome`, `MAG` | NCBI, PATRIC, GOLD, JGI |
+| `assembly` | NCBI |
+| `sample` | NMDC, GOLD |
+
+If the user provides accession numbers (or they appear in tool output files), add them to the `external_id` sheet:
+
+```
+EXTERNAL_ID:
+  mARW1_001   PATRIC   83332.12
+  ARW_S01     SRA      SRR12345678
+  ARW_S01     NMDC     nmdc:sty-11-34xj1150
+```
+
+Rules:
+- `db_name` must match a row in `external_db` — if the user has a database not in the table, flag it and ask them to add it to `external_db` via SQL before ingesting
+- One accession per database per object — if an object has two NCBI accessions, ask which one to use
+- No `workflow_id` — external IDs are persistent identifiers, not results of a workflow
+- External IDs can be included in any stage's bundle; they don't depend on edges or results
+
 ---
 
 ### Stage 4: Edge Results (if needed)

@@ -310,6 +310,13 @@ read_bundle <- function(bundle_path,
             results$workflow_files <- NULL
           }
 
+          # Process external_id sheet (after objects exist)
+          if ("external_id" %in% sheet_names) {
+            results$external_ids <- ingest_external_ids_with_con(wb, con, validate_only = validate_only)
+          } else {
+            results$external_ids <- NULL
+          }
+
           # Commit transaction if not validate_only
           if (!isTRUE(validate_only)) {
             DBI::dbCommit(con)
@@ -2289,4 +2296,74 @@ prompt_add_result_key_spec <- function(con, key, found_object_type) {
   DBI::dbWriteTable(con, "object_result_spec", new_rows, append = TRUE, row.names = FALSE)
   cli::cli_alert_success("Added result key {.val {key}} to spec for: {.val {selected}}")
   TRUE
+}
+
+
+#' Ingest external IDs from bundle worksheet (with existing connection)
+#'
+#' Reads the external_id sheet, validates object_id and db_name references,
+#' and inserts. PRIMARY KEY (object_id, db_name) — duplicate rows are replaced.
+#'
+#' @param wb openxlsx workbook object
+#' @param con A DBI connection to the database
+#' @param validate_only Logical; if TRUE, validation only (no insertion)
+#'
+#' @return List with n_processed and n_inserted counts
+#' @keywords internal
+ingest_external_ids_with_con <- function(wb, con, validate_only = FALSE) {
+
+  data <- openxlsx::read.xlsx(wb, sheet = "external_id") |>
+    dplyr::filter(
+      !is.na(.data$object_id)    & nzchar(.data$object_id),
+      !is.na(.data$db_name)      & nzchar(.data$db_name),
+      !is.na(.data$accession_id) & nzchar(.data$accession_id)
+    )
+
+  if (nrow(data) == 0) {
+    cli::cli_alert_warning("external_id sheet is empty. Skipping.")
+    return(list(n_processed = 0, n_inserted = 0, validation_passed = TRUE))
+  }
+
+  cli::cli_alert_info("Found {nrow(data)} external_id(s) in bundle.")
+
+  errors <- character()
+
+  # Validate object_id references
+  all_objects <- DBI::dbReadTable(con, "object")
+  missing_obj <- setdiff(data$object_id, all_objects$object_id)
+  if (length(missing_obj) > 0) {
+    errors <- c(errors, sprintf("object_ids not found: %s", paste(missing_obj, collapse = ", ")))
+  }
+
+  # Validate db_name references
+  all_dbs <- DBI::dbReadTable(con, "external_db")
+  missing_db <- setdiff(data$db_name, all_dbs$db_name)
+  if (length(missing_db) > 0) {
+    errors <- c(errors, sprintf(
+      "db_name(s) not in external_db spec: %s. Add them to external_db first.",
+      paste(missing_db, collapse = ", ")
+    ))
+  }
+
+  if (length(errors) > 0) {
+    cli::cli_abort(c("external_id validation failed:", errors))
+  }
+
+  if (isTRUE(validate_only)) {
+    cli::cli_alert_success("external_id validation passed ({nrow(data)} row(s)).")
+    return(list(n_processed = nrow(data), n_inserted = 0, validation_passed = TRUE))
+  }
+
+  n_inserted <- 0
+  for (i in seq_len(nrow(data))) {
+    DBI::dbExecute(con,
+      "INSERT OR REPLACE INTO external_id (object_id, db_name, accession_id)
+       VALUES (?, ?, ?)",
+      list(data$object_id[i], data$db_name[i], data$accession_id[i])
+    )
+    n_inserted <- n_inserted + 1
+  }
+
+  cli::cli_alert_success("Inserted/updated {n_inserted} external_id row(s).")
+  list(n_processed = nrow(data), n_inserted = n_inserted, validation_passed = TRUE)
 }
